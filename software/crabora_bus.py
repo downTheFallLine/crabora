@@ -244,6 +244,8 @@ def find_feetech_ports():
     candidates = sorted(glob.glob("/dev/tty.usb*"))
     if not candidates:
         candidates = sorted(glob.glob("/dev/tty.wchusbserial-*"))
+    if not candidates:
+        candidates = sorted(glob.glob("/dev/ttyACM*"))
     return candidates
 
 

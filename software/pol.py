@@ -42,7 +42,7 @@ from crabora_bus import (
 )
 
 
-SERVO_ID = 41  # factory default for a new servo
+SERVO_ID = 13  # factory default for a new servo
 
 
 def move_and_report(bus, servo_id, goal):
