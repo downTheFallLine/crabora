@@ -21,7 +21,7 @@ It also adds the one new capability gait work depends on:
 Layout:
   - Constants (BAUDRATE, register ADDR_*, MODE_*, conversion magnitudes)
   - Servo-ID helpers (COXA/FEMUR/TIBIA, make_id, leg_of, joint_of)
-  - find_feetech_port()             -- port discovery (same logic as before)
+  - find_feetech_port()             -- port discovery (delegates to uart_lib)
   - Speed conversion (rpm_to_raw / raw_to_rpm / rpm_to_pos_speed)
   - Bus class
       .open / .close / context manager
@@ -56,17 +56,21 @@ They can be migrated to import from this module as a separate step.
 """
 
 import contextlib
-import glob
 import time
 
-import serial
+from uart_lib import (
+    DEFAULT_BAUDRATE,
+    Uart,
+    find_feetech_port,
+    find_feetech_ports,
+)
 
 
 # =============================================================================
 # Protocol constants for the Feetech STS series (STS3215 et al.)
 # =============================================================================
 # The bus runs at 1 Mbps. Half-duplex; the FE-URT-2 handles direction switching.
-BAUDRATE = 1_000_000
+BAUDRATE = DEFAULT_BAUDRATE
 
 # Packet structure:
 #   0xFF 0xFF  <id>  <length>  <instruction>  <param1>...<paramN>  <checksum>
@@ -233,40 +237,6 @@ def leg_bearing_deg(leg):
     return LEG_LAYOUT_CW.index(leg) * 60.0
 
 
-# =============================================================================
-# Serial port discovery
-# =============================================================================
-def find_feetech_ports():
-    """Return all /dev/tty.usb* paths that look like FE-URT-2 adapters, sorted.
-
-    Returns a list; may be empty (no URTs), one element, or more.
-    """
-    candidates = sorted(glob.glob("/dev/tty.usb*"))
-    if not candidates:
-        candidates = sorted(glob.glob("/dev/tty.wchusbserial-*"))
-    if not candidates:
-        candidates = sorted(glob.glob("/dev/ttyACM*"))
-    return candidates
-
-
-def find_feetech_port():
-    """Return the most likely single /dev/tty.usb* path for one FE-URT-2.
-
-    Kept for backward compatibility with scripts that open a single bus.
-    """
-    candidates = find_feetech_ports()
-    if not candidates:
-        raise RuntimeError(
-            "No /dev/tty.usb* device found. Is the FE-URT-2 plugged in? "
-            "If you don't see one, you may need the WCH CH340 macOS driver "
-            "from wch-ic.com."
-        )
-    if len(candidates) > 1:
-        print(f"Multiple serial devices found: {candidates}")
-        print(f"Using the first: {candidates[0]}")
-    return candidates[0]
-
-
 def find_servo_port(servo_id, timeout=0.5):
     """Return the port of whichever visible URT the servo answers on.
 
@@ -349,25 +319,22 @@ class Bus:
         self.port_path = port  # None = auto-discover on open
         self.baudrate = baudrate
         self.timeout = timeout
-        self.ser = None
+        self.uart = None
 
     # ----- lifecycle -------------------------------------------------------
     def open(self):
-        if self.ser is not None:
+        if self.uart is not None:
             return self
-        if self.port_path is None:
-            self.port_path = find_feetech_port()
-        self.ser = serial.Serial(self.port_path, self.baudrate, timeout=self.timeout)
-        time.sleep(0.1)  # let the port settle after open
+        self.uart = Uart(
+            port=self.port_path, baudrate=self.baudrate, timeout=self.timeout,
+        ).open()
+        self.port_path = self.uart.port_path
         return self
 
     def close(self):
-        if self.ser is not None:
-            try:
-                self.ser.close()
-            except Exception:
-                pass
-            self.ser = None
+        if self.uart is not None:
+            self.uart.close()
+            self.uart = None
 
     def __enter__(self):
         return self.open()
@@ -387,14 +354,14 @@ class Bus:
         every error message can name the specific servo that's misbehaving
         -- "servo 23 (leg 2 tibia)" beats "some servo somewhere".
         """
-        if self.ser is None:
+        if self.uart is None:
             raise IOError("Bus is not open. Call .open() or use 'with Bus()'.")
         label = describe_id(servo_id)
-        self.ser.reset_input_buffer()
-        self.ser.write(packet)
+        self.uart.reset_input_buffer()
+        self.uart.write(packet)
         # Reply length: 2 header + 1 id + 1 length + 1 error + N params + 1 checksum
         reply_len = 6 + expected_params
-        reply = self.ser.read(reply_len)
+        reply = self.uart.read(reply_len)
         if len(reply) < reply_len:
             raise IOError(
                 f"Short reply from ID {servo_id} ({label}): "
@@ -425,10 +392,10 @@ class Bus:
 
     def _send_no_reply(self, packet):
         """Send a packet that will not be answered (broadcast / sync write)."""
-        if self.ser is None:
+        if self.uart is None:
             raise IOError("Bus is not open. Call .open() or use 'with Bus()'.")
-        self.ser.reset_input_buffer()
-        self.ser.write(packet)
+        self.uart.reset_input_buffer()
+        self.uart.write(packet)
 
     # ----- ping & reads ----------------------------------------------------
     def ping(self, servo_id):
@@ -683,8 +650,8 @@ class MultiBus:
         """Ping every CRABORA-scheme ID on every bus; build servo->bus routing."""
         self._servo_to_bus = {}
         for bus in self.buses:
-            saved_timeout = bus.ser.timeout
-            bus.ser.timeout = DISCOVERY_TIMEOUT
+            saved_timeout = bus.uart.timeout
+            bus.uart.timeout = DISCOVERY_TIMEOUT
             try:
                 for sid in DISCOVERY_IDS:
                     if not bus.ping(sid):
@@ -696,7 +663,7 @@ class MultiBus:
                         continue
                     self._servo_to_bus[sid] = bus
             finally:
-                bus.ser.timeout = saved_timeout
+                bus.uart.timeout = saved_timeout
 
     def close(self):
         for bus in self.buses:

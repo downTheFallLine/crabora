@@ -43,41 +43,15 @@ import sys
 
 from serial.tools import list_ports
 
-# WCH -- the USB-serial vendor the FE-URT-2 uses.
-WCH_VID = 0x1A86
-URT_PID = 0x55D3
+from uart_lib import connection, is_urt, list_urt_ports
 
 EXPECTED_DEFAULT = 3
 
 
-def is_urt(port):
-    """True if this pyserial port looks like an FE-URT-2 (WCH serial chip)."""
-    # Match on vendor first; PID can vary across board revisions, so treat a
-    # WCH device as a URT candidate even if the PID isn't the exact 0x55D3.
-    if port.vid == WCH_VID:
-        return True
-    return False
-
-
-def connection(location):
-    """Human label for how the board is attached, inferred from location ID.
-
-    "1-1"   -> a root-hub port      => direct cable
-    "2-1.2" -> dotted, downstream   => through an external hub / dongle
-    """
-    if not location:
-        return "unknown"
-    return "via hub" if "." in location else "direct"
-
-
 def find_urts():
     """Return (urts, others): pyserial ListPortInfo lists, URTs sorted stably."""
-    urts, others = [], []
-    for p in list_ports.comports():
-        (urts if is_urt(p) else others).append(p)
-    # Sort by USB serial number so the same physical board keeps its row
-    # between runs, regardless of enumeration order.
-    urts.sort(key=lambda p: (p.serial_number or "", p.device))
+    urts = list_urt_ports()
+    others = [p for p in list_ports.comports() if not is_urt(p)]
     return urts, others
 
 
