@@ -141,7 +141,7 @@ def find_urt_device():
 class Urt:
     """A context-managed serial port at the Feetech bus baud rate.
 
-        with Urt() as uart:
+        with Urt() as urt:
             urt.write(packet)
             reply = urt.read(expected_len)
 
@@ -183,7 +183,7 @@ class Urt:
 
     def _require_open(self):
         if self.ser is None:
-            raise IOError("Uart is not open. Call .open() or use 'with Uart()'.")
+            raise IOError("Urt is not open. Call .open() or use 'with Urt()'.")
 
     def reset_input_buffer(self):
         self._require_open()

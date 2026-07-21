@@ -58,9 +58,9 @@ They can be migrated to import from this module as a separate step.
 import contextlib
 import time
 
-from uart_lib import (
+from urt_lib import (
     DEFAULT_BAUDRATE,
-    Uart,
+    Urt,
     find_feetech_port,
     find_feetech_ports,
 )
