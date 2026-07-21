@@ -21,7 +21,7 @@ It also adds the one new capability gait work depends on:
 Layout:
   - Constants (BAUDRATE, register ADDR_*, MODE_*, conversion magnitudes)
   - Servo-ID helpers (COXA/FEMUR/TIBIA, make_id, leg_of, joint_of)
-  - find_feetech_port()             -- port discovery (delegates to uart_lib)
+  - find_feetech_port()             -- port discovery (delegates to urt_lib)
   - Speed conversion (rpm_to_raw / raw_to_rpm / rpm_to_pos_speed)
   - Bus class
       .open / .close / context manager
@@ -354,14 +354,14 @@ class Bus:
         every error message can name the specific servo that's misbehaving
         -- "servo 23 (leg 2 tibia)" beats "some servo somewhere".
         """
-        if self.uart is None:
+        if self.urt is None:
             raise IOError("Bus is not open. Call .open() or use 'with Bus()'.")
         label = describe_id(servo_id)
-        self.uart.reset_input_buffer()
-        self.uart.write(packet)
+        self.urt.reset_input_buffer()
+        self.urt.write(packet)
         # Reply length: 2 header + 1 id + 1 length + 1 error + N params + 1 checksum
         reply_len = 6 + expected_params
-        reply = self.uart.read(reply_len)
+        reply = self.urt.read(reply_len)
         if len(reply) < reply_len:
             raise IOError(
                 f"Short reply from ID {servo_id} ({label}): "
@@ -392,10 +392,10 @@ class Bus:
 
     def _send_no_reply(self, packet):
         """Send a packet that will not be answered (broadcast / sync write)."""
-        if self.uart is None:
+        if self.urt is None:
             raise IOError("Bus is not open. Call .open() or use 'with Bus()'.")
-        self.uart.reset_input_buffer()
-        self.uart.write(packet)
+        self.urt.reset_input_buffer()
+        self.urt.write(packet)
 
     # ----- ping & reads ----------------------------------------------------
     def ping(self, servo_id):
@@ -650,8 +650,8 @@ class MultiBus:
         """Ping every CRABORA-scheme ID on every bus; build servo->bus routing."""
         self._servo_to_bus = {}
         for bus in self.buses:
-            saved_timeout = bus.uart.timeout
-            bus.uart.timeout = DISCOVERY_TIMEOUT
+            saved_timeout = bus.urt.timeout
+            bus.urt.timeout = DISCOVERY_TIMEOUT
             try:
                 for sid in DISCOVERY_IDS:
                     if not bus.ping(sid):
@@ -663,7 +663,7 @@ class MultiBus:
                         continue
                     self._servo_to_bus[sid] = bus
             finally:
-                bus.uart.timeout = saved_timeout
+                bus.urt.timeout = saved_timeout
 
     def close(self):
         for bus in self.buses:
