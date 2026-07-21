@@ -319,22 +319,22 @@ class Bus:
         self.port_path = port  # None = auto-discover on open
         self.baudrate = baudrate
         self.timeout = timeout
-        self.uart = None
+        self.urt = None
 
     # ----- lifecycle -------------------------------------------------------
     def open(self):
-        if self.uart is not None:
+        if self.urt is not None:
             return self
-        self.uart = Uart(
+        self.urt = Urt(
             port=self.port_path, baudrate=self.baudrate, timeout=self.timeout,
         ).open()
-        self.port_path = self.uart.port_path
+        self.port_path = self.urt.port_path
         return self
 
     def close(self):
-        if self.uart is not None:
-            self.uart.close()
-            self.uart = None
+        if self.urt is not None:
+            self.urt.close()
+            self.urt = None
 
     def __enter__(self):
         return self.open()
