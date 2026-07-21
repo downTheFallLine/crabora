@@ -22,6 +22,7 @@ Layout:
   - Constants (BAUDRATE, register ADDR_*, MODE_*, conversion magnitudes)
   - Servo-ID helpers (COXA/FEMUR/TIBIA, make_id, leg_of, joint_of)
   - find_feetech_port()             -- port discovery (delegates to urt_lib)
+  - Angle conversion (deg_to_pos / pos_to_deg -- 0 deg = center)
   - Speed conversion (rpm_to_raw / raw_to_rpm / rpm_to_pos_speed)
   - Bus class
       .open / .close / context manager
@@ -39,15 +40,15 @@ Standalone usage:
                                        "what's alive on the bus" check)
 
 Programmatic usage:
-  from crabora_bus import Bus, CENTER_POSITION, rpm_to_pos_speed
+  from crabora_bus import Bus, deg_to_pos, rpm_to_pos_speed
 
   with Bus() as bus:
       bus.enable_torque(11)
       speed = rpm_to_pos_speed(15)             # 15 rpm in position-mode units
       bus.sync_goal_move({
-          11: (CENTER_POSITION - 300, speed),  # coxa
-          12: (CENTER_POSITION + 200, speed),  # femur
-          13: (CENTER_POSITION - 100, speed),  # tibia
+          11: (deg_to_pos(-30), speed),  # coxa
+          12: (deg_to_pos(20),  speed),  # femur
+          13: (deg_to_pos(-10), speed),  # tibia
       })
       bus.sync_wait_until_stopped([11, 12, 13], timeout=2.0)
 
@@ -123,6 +124,32 @@ DEGREES_PER_REV  = 360
 MIN_POSITION     = 0
 CENTER_POSITION  = 2048
 MAX_POSITION     = 4095
+
+# Counts per degree, for callers that'd rather think in angle-from-center
+# than raw position counts.
+COUNTS_PER_DEG = COUNTS_PER_REV / DEGREES_PER_REV  # 4096/360 ≈ 11.378
+
+
+def deg_to_pos(degrees):
+    """Convert an angle (0 = center, +/- from there) to a raw position count.
+
+    Result is clamped to MIN_POSITION..MAX_POSITION. Note this only reflects
+    the servo's mechanical 0..4095 range -- it does NOT know about firmware
+    angle limits (ADDR_MIN_ANGLE/ADDR_MAX_ANGLE), which may be narrower.
+
+    >>> deg_to_pos(0)
+    2048
+    >>> deg_to_pos(90)
+    3072
+    """
+    raw = round(CENTER_POSITION + degrees * COUNTS_PER_DEG)
+    return max(MIN_POSITION, min(raw, MAX_POSITION))
+
+
+def pos_to_deg(position):
+    """Inverse of deg_to_pos: raw position count -> degrees from center."""
+    return (position - CENTER_POSITION) / COUNTS_PER_DEG
+
 
 # Speed conversion. Goal-speed register is steps/second, 4096 steps/rev,
 # so register_value = rpm * STEPS_PER_REV / 60.
