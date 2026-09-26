@@ -1,3 +1,20 @@
+# Python
 __pycache__/
+*.py[cod]
+*.egg-info/
+.pytest_cache/
+
+# Virtual environments (rebuild per machine: pip install -r software/requirements.txt)
+.venv/
+venv/
+
+# macOS
+.DS_Store
+
+# Editor / local tool settings
+.vscode/
+.idea/
+.claude/settings.local.json__pycache__/
 *.pyc
 .DS_Store
+.venv/
