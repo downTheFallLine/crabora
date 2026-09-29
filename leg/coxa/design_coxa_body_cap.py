@@ -77,20 +77,29 @@ HORN_AXIS_OFFSET         = 12.5    # horn axis is offset from body centre along 
 # Pocket fit
 POCKET_FIT_GAP           = 0.5
 POCKET_X = SERVO_L + 2 * POCKET_FIT_GAP   # 46.2  (servo L direction)
-POCKET_Y = SERVO_W + 2 * POCKET_FIT_GAP   # 25.7  (servo W direction)
-POCKET_Z = SERVO_H + 1.0                  # 36.0  (servo H + 1mm slack on top)
+POCKET_WIDTH_TRIM        = 0.8     # tighten pocket width; absorbed by thicker ±Y
+                                   # walls so SCREW_OFFSET_Y (bolt position) doesn't move
+POCKET_Y = SERVO_W + 2 * POCKET_FIT_GAP - POCKET_WIDTH_TRIM   # 24.9  (servo W direction)
+POCKET_DEPTH_TRIM        = 1.9     # shallower pocket -- open top, so servo just sits
+                                   # proud of the wall rim by this much more
+POCKET_Z = SERVO_H + 1.0 - POCKET_DEPTH_TRIM   # 34.1  (servo H + 1mm slack on top)
 
 # Cap structure
 FLOOR_THK                = 5.0     # bottom of the cap (mates with deck top)
 WALL_THK_X               = 3.0     # ±X walls (short walls, no bolts)
-WALL_THK_Y               = 5.0     # ±Y walls THICKENED to host vertical M3 bolt
-                                   # passages.  With Φ3.4 centred in a 5 mm wall
-                                   # this leaves ~0.8 mm of wall material on each
-                                   # side of the bolt -- printable in PLA with
-                                   # 4-5 perimeters.  v2 (this version) uses M3
-                                   # for consistency with the tibia + femur caps
-                                   # (was M3 in v1; M3 also shrinks the cap so
-                                   # 6 legs fit at 60° spacing without overlap).
+WALL_THK_Y               = 5.0 + POCKET_WIDTH_TRIM   # 5.8 -- ±Y walls THICKENED to host
+                                   # vertical M3 bolt passages, plus the extra
+                                   # POCKET_WIDTH_TRIM absorbed here so SCREW_OFFSET_Y
+                                   # (bolt hole position) stays put while the outer
+                                   # footprint (CAP_Y) grows by POCKET_WIDTH_TRIM.
+                                   # With Φ3.4 centred in a 5.8 mm wall this leaves
+                                   # ~1.2 mm of wall material on each side of the
+                                   # bolt -- printable in PLA with 4-5 perimeters.
+                                   # v2 (this version) uses M3 for consistency with
+                                   # the tibia + femur caps (was M3 in v1; M3 also
+                                   # shrinks the cap so 6 legs fit at 60° spacing
+                                   # without overlap -- NOTE: the 0.8mm CAP_Y growth
+                                   # here tightens that clearance from ~5mm to ~4.2mm).
 
 # Derived cap outer footprint
 CAP_X = POCKET_X + 2 * WALL_THK_X                       # 52.2
@@ -101,13 +110,14 @@ CAP_Z = FLOOR_THK + POCKET_Z                            # 41.0
 # +HORN_AXIS_OFFSET in X from the cap centre to match the servo's horn.
 HORN_CLEAR_DIA           = 22.0    # 20 mm horn + 2 mm slack
 
-# CABLE PASS-THROUGH: a SQUARE hole through the floor near the -X (back) end,
-# over the servo's rear cable connectors (opposite the +X horn).  The cap is a
+# CABLE PASS-THROUGH: a slot through the floor near the -X (back) end, over
+# the servo's rear cable connectors (opposite the +X horn).  The cap is a
 # cover that sits ON TOP of the servo; the horn passes through the DECK, not the
 # cap, so the cap has NO horn hole.  (HORN_* params above are kept only because
 # the body deck imports them for ITS round horn hole + cap placement.)
-CABLE_HOLE_SQ            = 16.0    # square cable hole size
-CABLE_HOLE_X             = -(POCKET_X / 2.0 - CABLE_HOLE_SQ / 2.0 - 1.5)  # near -X end
+CABLE_HOLE_X_SIZE        = 26.0    # cable hole span along X (16.0 + 10mm longer)
+CABLE_HOLE_Y_SIZE        = POCKET_Y    # cable hole spans the full pocket width (Y)
+CABLE_HOLE_X             = -(POCKET_X / 2.0 - CABLE_HOLE_X_SIZE / 2.0 - 1.5)  # near -X end
 
 # Vertical bolt passages through the ±Y walls of the cap, full Z height.
 # Long M3 bolts thread from the cap top down through these passages
@@ -158,10 +168,11 @@ def build_cap():
     pocket.apply_translation([0.0, 0.0, pocket_center_z + 0.5])  # over-cut top
     cutters.append(pocket)
 
-    # Square CABLE pass-through through the FLOOR, near the -X (back) end, over
-    # the servo's rear connectors.  No horn hole -- the horn passes through the
-    # DECK, not the cap.  -X end wall is solid (the old port is removed).
-    cable = creation.box(extents=[CABLE_HOLE_SQ, CABLE_HOLE_SQ, FLOOR_THK + 2.0])
+    # CABLE pass-through slot through the FLOOR, near the -X (back) end, over
+    # the servo's rear connectors, spanning the full pocket width (Y).  No horn
+    # hole -- the horn passes through the DECK, not the cap.  -X end wall is
+    # solid (the old port is removed).
+    cable = creation.box(extents=[CABLE_HOLE_X_SIZE, CABLE_HOLE_Y_SIZE, FLOOR_THK + 2.0])
     cable.apply_translation([CABLE_HOLE_X, 0.0, FLOOR_THK / 2.0])
     cutters.append(cable)
 
@@ -253,8 +264,8 @@ def main():
     print(f"  walls     : ±X = {WALL_THK_X:.1f} mm,  "
           f"±Y = {WALL_THK_Y:.1f} mm (host bolt passages)")
     print(f"  floor     : {FLOOR_THK:.1f} mm thick (no horn hole -- horn through deck)")
-    print(f"  cable hole: {CABLE_HOLE_SQ:.0f} x {CABLE_HOLE_SQ:.0f} mm SQUARE thru floor "
-          f"at X={CABLE_HOLE_X:.1f} (back/-X end), -X wall solid")
+    print(f"  cable hole: {CABLE_HOLE_X_SIZE:.1f} x {CABLE_HOLE_Y_SIZE:.1f} mm thru floor "
+          f"at X={CABLE_HOLE_X:.1f} (back/-X end), spans full pocket width, -X wall solid")
     print(f"  4x M3 bolt passages at +/-{SCREW_OFFSET_X:.1f} X, "
           f"+/-{SCREW_OFFSET_Y:.2f} Y  (vertical, full cap height)")
     print(f"  hardware  : 4x M3 x ~55 mm bolts + M3 nuts on deck underside")
