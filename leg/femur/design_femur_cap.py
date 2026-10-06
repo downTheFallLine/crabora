@@ -12,9 +12,11 @@ Cap is OPEN at the BOTTOM (-Z) -- it slides down over the servo from
 above and seats on the pan's flat top.
 
 Cap walls:
-  - +Y BACK wall (3 mm): Φ22 horn hole (same as tibia cap), offset
-    +12.5 in X.  Horn pokes through to drive the femur link beyond.
-  - -Y FRONT wall (3 mm): SQUARED-OFF OPEN BACK -- a rectangular
+  - +Y BACK wall (3.45 mm): Φ22 horn U-slot, offset +12.5 in X --
+    semicircle on the roof side, lower half open straight down to the
+    open face (Z=0) so the cap slides over a servo with horn attached.
+    Horn pokes through to drive the femur link beyond.
+  - -Y FRONT wall (3.45 mm): SQUARED-OFF OPEN BACK -- a rectangular
     cutout 30 W x 25 H, centred horizontally on the wall, with its
     BOTTOM edge flush with the cap's open face (Z=0).  TOP edge at
     Z=25 stops below the cap roof (Z=[25.2, 28.2]), so the top wall
@@ -22,9 +24,9 @@ Cap walls:
     as a U-shape: two vertical pillars on either side of the opening,
     connected by a thin strip just under the roof.  Serves as cable
     exit + servo back-face access + weight relief.
-  - ±X SIDE walls (7 mm): solid, host 4 vertical M3 bolt passages
+  - ±X SIDE walls (7.6 mm): solid, host 4 vertical M3 bolt passages
     that clamp the cap down to the flat pan.  Bolts at (±26.6, ±14)
-    in cap frame, centred in the ±X wall material.
+    in cap frame (fixed to match the pan).
   - +Z TOP wall (3 mm): closed roof above the servo.
 
 Bolt span: cap (28.2) + pan (5) + nut+washer (~3) = ~36 mm.
@@ -68,14 +70,21 @@ HORN_DISC_THK            = 3.1
 
 # Pocket fit (servo lying on side: L=cap X, H=cap Y=horn axis, W=cap Z)
 POCKET_FIT_GAP           = 0.5
-POCKET_X = SERVO_L + 2 * POCKET_FIT_GAP   # 46.2  (cap X = servo L  = radial)
-POCKET_Y = SERVO_H + 2 * POCKET_FIT_GAP   # 36.0  (cap Y = servo H  = horn axis / tangent)
+POCKET_LENGTH_TRIM       = 1.2     # tighten pocket length; absorbed by thicker ±X
+                                   # walls so the outer length (CAP_X) and bolt
+                                   # positions (SCREW_OFFSET_X) don't move
+POCKET_X = SERVO_L + 2 * POCKET_FIT_GAP - POCKET_LENGTH_TRIM   # 45.0  (cap X = servo L  = radial)
+POCKET_WIDTH_TRIM        = 0.9     # tighten pocket width; absorbed by thicker ±Y
+                                   # walls so the outer footprint (CAP_Y) doesn't change
+POCKET_Y = SERVO_H + 2 * POCKET_FIT_GAP - POCKET_WIDTH_TRIM   # 35.1  (cap Y = servo H  = horn axis / tangent)
 POCKET_Z = SERVO_W + 0.5                  # 25.2  (cap Z = servo W  = vertical)
 
 # Cap walls
-WALL_THK_X               = 7.0     # ±X SIDE walls -- thick, host vertical bolt passages
-WALL_THK_Y               = 3.0     # ±Y walls -- +Y has Φ22 horn hole,
-                                   #              -Y has Φ32 open back
+WALL_THK_X               = 7.0 + POCKET_LENGTH_TRIM / 2.0   # 7.6 -- ±X SIDE walls, thick,
+                                   # host vertical bolt passages, plus half the
+                                   # POCKET_LENGTH_TRIM each so CAP_X stays 60.2.
+WALL_THK_Y               = 3.0 + POCKET_WIDTH_TRIM / 2.0   # 3.45 -- ±Y walls,
+                                   # +Y has Φ22 horn U-slot, -Y has rect open back
 TOP_THK                  = 3.0     # +Z TOP wall (closed roof)
 
 # Derived cap outer dimensions
@@ -95,8 +104,10 @@ BACK_OPEN_H              = 25.0    # Z height (bottom flush with open face Z=0,
 
 # Vertical bolt passages through ±X walls, open face -> top
 MOUNT_HOLE_DIA           = 3.4     # M3 clearance
-SCREW_OFFSET_X           = (POCKET_X + WALL_THK_X) / 2.0   # 26.6, centred in
-                                                            # the ±X wall material
+SCREW_OFFSET_X           = 26.6    # ±X from cap centre -- FIXED (matches the coxa
+                                   # pan's CAP_SCREW_OFFSET_X); not derived from the
+                                   # pocket, so pocket trims can't move the bolts.
+                                   # Leaves 2.4 mm wall inboard / 1.8 mm outboard.
 SCREW_OFFSET_Y           = 14.0    # ±Y from cap centre
 
 OUT_DIR  = "linkage_leg"
@@ -158,6 +169,22 @@ def build_cap():
          POCKET_Y / 2.0 + WALL_THK_Y / 2.0,
          POCKET_Z / 2.0])
     cutters.append(horn_hole)
+
+    # Open the lower half of the horn hole down to the open face (Z=0),
+    # turning it into a U-slot: semicircle on the roof side, straight
+    # sides running out the open end, so the cap slides down over a
+    # servo with its horn already attached.
+    horn_slot_z_lo = -1.0
+    horn_slot_z_hi = POCKET_Z / 2.0
+    horn_slot = creation.box(extents=[
+        HORN_CLEAR_DIA,
+        WALL_THK_Y + 4.0,
+        horn_slot_z_hi - horn_slot_z_lo])
+    horn_slot.apply_translation([
+        HORN_AXIS_OFFSET,
+        POCKET_Y / 2.0 + WALL_THK_Y / 2.0,
+        (horn_slot_z_lo + horn_slot_z_hi) / 2.0])
+    cutters.append(horn_slot)
 
     # SQUARED-OFF OPEN BACK through -Y FRONT wall.
     # Rectangular cut, centred horizontally on the wall (X=0), bottom
@@ -260,7 +287,8 @@ def main():
           f"(shoebox, no flange)")
     print(f"  walls     : ±X = {WALL_THK_X:.1f} mm (host bolt passages),  "
           f"±Y = {WALL_THK_Y:.1f} mm,  top = {TOP_THK:.1f} mm")
-    print(f"  horn hole : Φ{HORN_CLEAR_DIA:.1f} thru +Y BACK wall at X=+{HORN_AXIS_OFFSET:.1f}, Z={POCKET_Z/2:.1f}")
+    print(f"  horn slot : Φ{HORN_CLEAR_DIA:.1f} U-slot thru +Y BACK wall at X=+{HORN_AXIS_OFFSET:.1f}, Z={POCKET_Z/2:.1f}  "
+          f"(round on roof side, open down to open face)")
     print(f"  open back : {BACK_OPEN_W:.0f} W x {BACK_OPEN_H:.0f} H rectangle thru -Y FRONT wall  "
           f"(bottom flush with open face; top stops below cap roof -- no top notch)")
     print(f"  4x M3 bolt passages at +/-{SCREW_OFFSET_X:.1f} X, "

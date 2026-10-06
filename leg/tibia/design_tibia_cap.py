@@ -22,8 +22,8 @@ Geometry (CAD frame: Z = horn axis direction, open face at Z=0):
     pass vertically through the cap (open face to back face), tying the
     cap to the femur link's knee plate above with M3 nuts.
   - Pocket holds tibia STS3215 with H axis = horn axis = cap Z
-  - Walls: 3 mm on +/-X; THICKENED 7 mm on +/-Y to host the vertical
-    bolt passages.  2.5 mm on +Z (back wall, with horn hole + bolt
+  - Walls: 3.6 mm on +/-X; THICKENED 7.25 mm on +/-Y to host the vertical
+    bolt passages.  2.9 mm on +Z (back wall, with horn hole + bolt
     head clearance).
   - Open at -Z (the mating face -- this is what mates with the femur
     link surface)
@@ -74,21 +74,29 @@ SERVO_H                  = 35.0
 HORN_AXIS_OFFSET         = 12.5    # from servo body centre, along L = cap X
 HORN_DISC_THK            = 3.1
 
-# Pocket fit
+# Pocket fit -- same per-servo-axis fit as the femur cap (tuned on a print):
+#   L 45.0, W 25.2, H 35.1.  Each trim is absorbed by thickening the walls
+#   on that axis so the cap's outer size and bolt holes don't move.
 POCKET_FIT_GAP           = 0.5
-POCKET_X = SERVO_L + 2 * POCKET_FIT_GAP   # 46.2  (cap X = servo L)
-POCKET_Y = SERVO_W + 2 * POCKET_FIT_GAP   # 25.7  (cap Y = servo W)
-POCKET_Z = SERVO_H + 0.5                  # 35.5  (cap Z = servo H, horn axis)
+POCKET_LENGTH_TRIM       = 1.2
+POCKET_WIDTH_TRIM        = 0.5
+POCKET_DEPTH_TRIM        = 0.4
+POCKET_X = SERVO_L + 2 * POCKET_FIT_GAP - POCKET_LENGTH_TRIM   # 45.0  (cap X = servo L)
+POCKET_Y = SERVO_W + 2 * POCKET_FIT_GAP - POCKET_WIDTH_TRIM    # 25.2  (cap Y = servo W)
+POCKET_Z = SERVO_H + 0.5 - POCKET_DEPTH_TRIM                   # 35.1  (cap Z = servo H, horn axis)
 
 # Cap structure
-WALL_THK_X               = 3.0     # walls on ±X (thin -- no bolts pass through)
-WALL_THK_Y               = 7.0     # walls on ±Y (thickened to host vertical bolt
+WALL_THK_X               = 3.0 + POCKET_LENGTH_TRIM / 2.0   # 3.6 -- walls on ±X (thin -- no
+                                   # bolts pass through)
+WALL_THK_Y               = 7.0 + POCKET_WIDTH_TRIM / 2.0    # 7.25 -- walls on ±Y (thickened to host vertical bolt
                                    # passages from open face to back face).
                                    # With a Φ3.4 bolt centred in the wall this
                                    # leaves ~1.8 mm of wall material on each side
                                    # of the bolt -- printable in PLA with 4-5
                                    # perimeters.
-BACK_THK                 = 2.5     # +Z back wall (thinner so horn pokes proud)
+BACK_THK                 = 2.5 + POCKET_DEPTH_TRIM   # 2.9 -- +Z back wall (thin so horn
+                                   # pokes proud; CAP_Z stays 38.0 so the horn still
+                                   # sits ~0.6 mm proud, same as before the trim)
 
 # Derived cap outer dimensions
 CAP_X = POCKET_X + 2 * WALL_THK_X                       # 52.2
@@ -108,10 +116,10 @@ CABLE_PORT_H             = 30.0    # Z span (bottom flush with open face)
 # nuts on the underside of the femur link's knee plate.
 MOUNT_HOLE_DIA           = 3.4     # M3 clearance
 SCREW_OFFSET_X           = 15.0    # ±X from cap centre (within the ±Y wall span)
-SCREW_OFFSET_Y           = (POCKET_Y + WALL_THK_Y) / 2.0   # 16.35, centred in the
-                                                            # ±Y wall material
-                                                            # (between pocket edge
-                                                            # and cap outer face)
+SCREW_OFFSET_Y           = 16.35   # ±Y from cap centre -- FIXED (matches the femur
+                                   # link's KNEE_MOUNT_Y_HALF); not derived from the
+                                   # pocket, so pocket trims can't move the bolts.
+                                   # Leaves ~2.0 mm wall inboard / 1.8 mm outboard.
 
 OUT_DIR  = "linkage_leg"
 STL_PATH = OUT_DIR + "/tibia_cap.stl"
