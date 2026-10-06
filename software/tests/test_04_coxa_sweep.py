@@ -286,21 +286,23 @@ def main():
         stalled = set()
         for rep in range(1, args.reps + 1):
             print(f"  rep {rep}/{args.reps}:", end="", flush=True)
+            bad = []
             for label, pick in (("right", 1), ("left", 0)):
                 targets = {sid: limits[sid][pick] for sid in joints}
                 results = move_all(packet, joints, targets)
-                bad = []
+                hit = False
                 for sid, (pos, timed_out) in results.items():
                     err = abs(pos - targets[sid])
                     worst_error[sid] = max(worst_error[sid], err)
                     if timed_out:
                         stalled.add(sid)
-                        bad.append(f"{sid} stalled at {pos} (target {targets[sid]})")
-                print(f" {label}{'' if not bad else ' ✗'}", end="", flush=True)
-                for msg in bad:
-                    print(f"\n    ⚠ servo {msg} -- binding or stalled?",
-                          end="", flush=True)
+                        hit = True
+                        bad.append(f"servo {sid} stalled going {label} at {pos} "
+                                   f"(target {targets[sid]}) -- binding or stalled?")
+                print(f" {label}{' ✗' if hit else ''}", end="", flush=True)
             print()
+            for msg in bad:
+                print(f"    ⚠ {msg}")
 
         print("\n  parking at center...")
         move_all(packet, joints, {sid: CENTER_POSITION for sid in joints})
