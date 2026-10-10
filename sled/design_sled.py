@@ -62,9 +62,11 @@ BOARDS = {
         "name": "SELOKY LM2596 buck converter",
         "length": 66.0,
         "width": 36.0,
-        "hole_dx": 62.0,             # 66 - 2x2 mm inset
-        "hole_dy": 32.0,             # 36 - 2x2 mm inset
-        "hole_dia": 2.0,             # specified 2026-10-10
+        "hole_dx": 61.8,             # measured 2026-10-10: 64 mm outside-to-
+                                     # outside across the Φ2.2 board holes,
+                                     # so centre-to-centre = 64 - 2.2
+        "hole_dy": 31.8,             # likewise 34 - 2.2
+        "hole_dia": 2.2,             # specified 2026-10-10 (was 2.0, +0.2)
         "screw_major": 1.8,          # measured 2026-10-08
         "standoff_dia": 6.0,
         "screw_verified": True,
