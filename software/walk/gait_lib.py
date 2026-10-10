@@ -45,10 +45,14 @@ LEG_NAME = {
 # A CCW coxa rotation moves leg n's foot forward by sin(bearing), which
 # is positive for legs 1-3 (right side) and negative for 4-6 (left).
 #
-# ⚠ UNVERIFIED ON HARDWARE. Assumes every coxa servo is mounted the same
-# way round. If all six go the wrong way, use --invert and then flip this
-# table. If only SOME go wrong, the servos are mounted inconsistently --
-# fix that in hardware rather than patching individual legs here.
+# ✓ VERIFIED ON HARDWARE 2026-10-10: all six legs driven together by
+# tripod_coxa.py swung correctly, the two tripods opposing as intended,
+# with no --invert. The mirror is real and this table has it right.
+#
+# --invert survives as a diagnostic, not a fix: if a future run needs it,
+# something changed in how the servos are mounted. If only SOME legs go
+# the wrong way, they are mounted inconsistently -- fix that in hardware
+# rather than patching individual legs here.
 FORWARD_SIGN = {1: +1, 2: +1, 3: +1, 4: -1, 5: -1, 6: -1}
 
 # Alternating tripods: each has two legs on one side and one on the

@@ -38,14 +38,9 @@ FORWARD_SIGN below. Note legs 2 and 5 are the beam legs -- their coxa
 swing is pure fore/aft, while the corner legs only contribute half as
 much per degree.
 
-⚠ FORWARD_SIGN IS UNVERIFIED ON HARDWARE. It assumes every coxa servo
-is mounted the same way round, so that a rising count means the same
-rotational sense on all six legs. If the legs go the wrong way, do NOT
-patch individual legs -- run with --invert, confirm that fixes all six,
-and then flip the table here. If only SOME legs go the wrong way, the
-servos are not mounted consistently; fix that in hardware or record it
-here with a comment, because a half-corrected table will haunt the gait
-code forever.
+✓ FORWARD_SIGN was VERIFIED ON HARDWARE 2026-10-10 -- all six legs, no
+--invert needed. The table lives in gait_lib.py. --invert remains as a
+diagnostic: needing it now would mean a servo has been remounted.
 
 Run --dry-run first. It prints every target without energising anything.
 

@@ -110,6 +110,12 @@ This is the single most likely source of a leg driving into its
 neighbour. It bit the previous generation — the tripod gait's coxa
 direction was never verified on hardware.
 
+**This generation's table is verified.** On 2026-10-10 `tripod_coxa.py`
+drove all six coxas together on the test stand, with the two tripods
+opposing as intended and no `--invert` needed. `FORWARD_SIGN` in
+`gait_lib.py` is correct as written. `--invert` stays as a diagnostic:
+if a later run needs it, a servo has been remounted.
+
 ## Still undefined
 
 Deliberately not fixed here yet, because they want measuring on the
@@ -117,8 +123,8 @@ assembled robot rather than guessing:
 
 - **Joint zero poses** — what physical pose each joint's 2048 centre
   corresponds to, per joint. Set with `software/utils/set_center.py`.
-- **Joint angle signs** — which way positive goes for coxa, femur and
-  tibia, and the per-side mirror sign above.
+- **Joint angle signs** — which way positive goes for femur and tibia.
+  The coxa's, including the per-side mirror, is settled (above).
 - **Link lengths** — coxa offset, femur and tibia, from the current
   `leg/*/linkage_leg` designs. The old figures (58 / 100 / 120 mm)
   predate the current leg revision and should be re-read from the
