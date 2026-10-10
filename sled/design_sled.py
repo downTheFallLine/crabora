@@ -47,8 +47,12 @@ from trimesh import creation
 # BOARDS
 # =============================================================
 # length / width : PCB footprint, mm
-# inset          : hole centre to the nearest PCB edge, both directions
+# hole_dx/dy     : standoff centres, centre-to-centre, along length/width
+# hole_dia       : hole through standoff + slab (None -> pilot from screw_major)
 # screw_major    : screw outside thread diameter, mm
+#
+# Hole spans are given outright rather than derived from a single inset,
+# because a board's inset isn't always the same in both directions.
 #
 # ⚠ Dimensions measured off Tom's actual boards -- note the buck is the
 # LARGER LM2596 variant; plenty of listings sell a ~43 x 21 mm board
@@ -58,17 +62,31 @@ BOARDS = {
         "name": "SELOKY LM2596 buck converter",
         "length": 66.0,
         "width": 36.0,
-        "inset": 2.0,
+        "hole_dx": 62.0,             # 66 - 2x2 mm inset
+        "hole_dy": 32.0,             # 36 - 2x2 mm inset
+        "hole_dia": 2.0,             # specified 2026-10-10
         "screw_major": 1.8,          # measured 2026-10-08
+        "standoff_dia": 6.0,
         "screw_verified": True,
     },
     "urt": {
         "name": "Feetech FE-URT-2",
         "length": 56.5,
         "width": 36.5,
-        "inset": 3.0,                # measured 2026-10-08
-        "screw_major": 1.8,          # ASSUMED same as the buck -- unmeasured
-        "screw_verified": False,
+        "hole_dx": 48.5,             # measured 2026-10-09 with M3 screws fitted:
+                                     # 51.5 mm across the outsides of the shanks,
+                                     # so centre-to-centre = 51.5 - 3.0
+        "hole_dy": 28.5,             # measured 2026-10-09 with M3 screws fitted:
+                                     # 31.5 mm across the outsides of the shanks,
+                                     # so centre-to-centre = 31.5 - 3.0
+        "hole_dia": 2.2,             # pilot for an M3 WOOD screw biting into the
+                                     # post -- near the screw's core diameter, not
+                                     # the 0.8x major used for machine screws
+        "screw_major": 3.0,          # M3 wood screw
+        "standoff_dia": 8.0,         # bigger post than the buck's: an M3 wood
+                                     # screw wedges as it cuts, and Φ6 would
+                                     # leave only ~1.9 mm of wall to split
+        "screw_verified": True,
     },
 }
 
@@ -80,7 +98,7 @@ SLAB_THK              = 3.0       # slab thickness
 MARGIN                = 3.0       # slab border beyond the PCB footprint
 
 STANDOFF_H            = 5.0       # height above the slab top face
-STANDOFF_DIA          = 6.0       # outer diameter of each post
+STANDOFF_DIA          = 6.0       # default post OD; boards may override
 
 # Self-tapping pilot is ~0.8 x the screw's major diameter, nudged up a
 # touch because FDM prints small holes undersize.  Clearance adds 0.3.
@@ -115,10 +133,12 @@ def build_sled(board, pilot=None, clearance=False, vent=False):
     """CAD frame: origin at the slab's centre on its BOTTOM face (Z=0).
     Slab occupies Z = 0 .. SLAB_THK; standoffs rise to SLAB_THK + STANDOFF_H."""
 
-    dx = board["length"] - 2 * board["inset"]
-    dy = board["width"] - 2 * board["inset"]
+    dx = board["hole_dx"]
+    dy = board["hole_dy"]
     centres = hole_positions(dx, dy)
 
+    if pilot is None:
+        pilot = board["hole_dia"]
     if pilot is None:
         pilot = round(board["screw_major"] * PILOT_RATIO, 1)
     screw_dia = (board["screw_major"] + CLEARANCE_EXTRA) if clearance else pilot
@@ -126,8 +146,9 @@ def build_sled(board, pilot=None, clearance=False, vent=False):
     # Slab must cover the PCB footprint AND every standoff, whichever is
     # wider -- a hole pattern wider than the board would otherwise leave a
     # post hanging off the edge.
-    span_x = dx + STANDOFF_DIA
-    span_y = dy + STANDOFF_DIA
+    post_dia = board.get("standoff_dia", STANDOFF_DIA)
+    span_x = dx + post_dia
+    span_y = dy + post_dia
     slab_l = max(board["length"] + 2 * MARGIN, span_x + 2.0)
     slab_w = max(board["width"] + 2 * MARGIN, span_y + 2.0)
 
@@ -139,7 +160,7 @@ def build_sled(board, pilot=None, clearance=False, vent=False):
 
     for cx, cy in centres:
         parts.append(z_cylinder(
-            STANDOFF_DIA / 2.0, STANDOFF_H,
+            post_dia / 2.0, STANDOFF_H,
             [cx, cy, SLAB_THK + STANDOFF_H / 2.0]))
 
     # ---- negative cutters ------------------------------------------
@@ -161,7 +182,8 @@ def build_sled(board, pilot=None, clearance=False, vent=False):
     sled.merge_vertices()
     sled.fix_normals()
     return sled, dict(slab_l=slab_l, slab_w=slab_w, screw_dia=screw_dia,
-                      centres=centres, dx=dx, dy=dy, vent=vent_dims)
+                      centres=centres, dx=dx, dy=dy, vent=vent_dims,
+                      post_dia=post_dia)
 
 
 # =============================================================
@@ -243,15 +265,21 @@ def main():
     e = sled.extents
     print(f"  bbox {e[0]:.1f} x {e[1]:.1f} x {e[2]:.1f} mm   "
           f"vol {sled.volume / 1000.0:.2f} cm^3   watertight {sled.is_watertight}")
+    inset_x = (board["length"] - info["dx"]) / 2.0
+    inset_y = (board["width"] - info["dy"]) / 2.0
     print(f"  board     : {board['length']:g} x {board['width']:g} mm PCB, "
-          f"holes inset {board['inset']:g} mm from each edge")
+          f"holes inset {inset_x:g} mm (long) / {inset_y:g} mm (short)")
     print(f"  slab      : {info['slab_l']:.1f} x {info['slab_w']:.1f} x "
           f"{SLAB_THK:.0f} mm  (+{MARGIN:.0f} mm margin)")
-    print(f"  standoffs : 4x Φ{STANDOFF_DIA:.0f} x {STANDOFF_H:.0f} mm tall  at "
+    print(f"  standoffs : 4x Φ{info['post_dia']:.0f} x {STANDOFF_H:.0f} mm tall  at "
           f"{', '.join(f'({x:+.2f},{y:+.2f})' for x, y in info['centres'])}")
     print(f"  hole span : {info['dx']:g} x {info['dy']:g} mm centre-to-centre")
-    print(f"  screws    : Φ{info['screw_dia']:.1f} "
-          f"({'clearance, nut under slab' if args.clearance else 'self-tapping pilot'})"
+    # A hole at or above the thread's major diameter is a clearance hole,
+    # not something a screw can bite into -- say which it actually is.
+    fit = ("clearance, nut under slab"
+           if args.clearance or info["screw_dia"] >= board["screw_major"]
+           else "self-tapping pilot")
+    print(f"  screws    : Φ{info['screw_dia']:.1f} ({fit})"
           f"  for a {board['screw_major']:g} mm thread")
     if not board["screw_verified"]:
         print(f"    ⚠ the {board['screw_major']:g} mm screw size for this board is "
