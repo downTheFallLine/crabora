@@ -251,6 +251,11 @@ def main():
     ap = argparse.ArgumentParser(
         description="CRABORA proto-walk 1: sweep the coxas forward and rear.",
         formatter_class=argparse.RawDescriptionHelpFormatter)
+    ap.add_argument("--reps", type=int, default=1,
+                    help="forward/rear cycles to run (default 1). More than one "
+                         "runs continuously, with no pause between stages.")
+    ap.add_argument("--no-pause", dest="pause", action="store_false",
+                    help="skip the operator confirmations entirely")
     ap.add_argument("--angle", type=float, default=DEFAULT_ANGLE,
                     help=f"degrees either side of centre (default {DEFAULT_ANGLE:g})")
     ap.add_argument("--speed", type=int, default=DEFAULT_SPEED,
@@ -265,6 +270,8 @@ def main():
                     help="serial ports (default: auto-discover FE-URT-2 boards)")
     args = ap.parse_args()
 
+    if args.reps < 1:
+        ap.error("--reps must be at least 1")
     if not 0 < args.angle <= 90:
         ap.error("--angle must be between 0 and 90 degrees")
     if not 1 <= args.speed <= 3400:
@@ -335,34 +342,79 @@ def main():
             write2(packet, port, sid, ADDR_GOAL_SPEED, args.speed, "write speed")
             write1(packet, port, sid, ADDR_TORQUE_ENABLE, 1, "enable torque")
 
-        stages = [
-            ("CENTRE",  0, "Are ALL coxas truly centred? Sight along the body "
-                           "-- each leg should point straight out from its flat."),
-            ("FORWARD", +1, "Did every leg swing FORWARD (toward the point between "
-                            "legs 1 and 6)?"),
-            ("REAR",    -1, "Did every leg swing REAR?"),
-        ]
+        trouble = {}   # leg -> {"stalled", "off target"} seen during the run
 
-        for label, direction, question in stages:
+        def go(label, direction, verbose=True):
+            """One move. Returns (results, arrived)."""
             targets, clamped = plan_targets(coxas, limits, counts, direction,
                                             args.invert)
-            print(f"\n  -> {label}")
-            for leg, want, got in clamped:
-                print(f"     leg {leg}: {want} clamped to {got} by its firmware "
-                      f"limit ({to_degrees(got):+.1f}° not {to_degrees(want):+.1f}°)")
+            if verbose:
+                print(f"\n  -> {label}")
+                for leg, want, got in clamped:
+                    print(f"     leg {leg}: {want} clamped to {got} by its firmware "
+                          f"limit ({to_degrees(got):+.1f}° not "
+                          f"{to_degrees(want):+.1f}°)")
             results = move_all(packet, coxas, targets)
-            arrived = report(coxas, targets, results, limits)
-            if not arrived:
-                print("\n  Not every joint reached its target -- see the flags above.")
-            if not confirm(question):
-                print("\n  Stopped. Returning to centre and going limp.")
-                move_all(packet, coxas,
-                         {leg: CENTER_POSITION for leg in coxas})
-                return 1
+            arrived = True
+            if verbose:
+                arrived = report(coxas, targets, results, limits)
+                if not arrived:
+                    print("\n  Not every joint reached its target -- "
+                          "see the flags above.")
+            else:
+                for leg, (pos, timed_out) in results.items():
+                    if timed_out or abs(pos - targets[leg]) > POSITION_TOLERANCE:
+                        arrived = False
+                        trouble.setdefault(leg, set()).add(
+                            "stalled" if timed_out else "off target")
+            return results, arrived
+
+        # --- centre, and the one pause worth keeping ---------------------
+        _results, _ok = go("CENTRE", 0)
+        if args.pause and not confirm(
+                "Are ALL coxas truly centred? Sight along the body -- each leg "
+                "should point straight out from its flat."):
+            print("\n  Stopped. Returning to centre and going limp.")
+            return 1
+
+        # --- N forward/rear cycles ---------------------------------------
+        single = args.reps == 1 and args.pause
+        if not single:
+            print()
+        for rep in range(1, args.reps + 1):
+            if not single:
+                print(f"  rep {rep}/{args.reps}:", end="", flush=True)
+            for label, direction, question in (
+                    ("FORWARD", +1, "Did every leg swing FORWARD (toward the "
+                                    "point between legs 1 and 6)?"),
+                    ("REAR",    -1, "Did every leg swing REAR?")):
+                _results, arrived = go(label, direction, verbose=single)
+                if not single:
+                    print(f" {label.lower()}{'' if arrived else ' ✗'}",
+                          end="", flush=True)
+                elif not confirm(question):
+                    print("\n  Stopped. Returning to centre and going limp.")
+                    move_all(packet, coxas,
+                             {leg: CENTER_POSITION for leg in coxas})
+                    return 1
+            if not single:
+                print()
 
         print("\n  -> CENTRE (finishing)")
         results = move_all(packet, coxas, {leg: CENTER_POSITION for leg in coxas})
         report(coxas, {leg: CENTER_POSITION for leg in coxas}, results, limits)
+
+        if trouble:
+            print()
+            for leg in sorted(trouble):
+                print(f"  ⚠ leg {leg} ({LEG_NAME[leg]}): "
+                      f"{', '.join(sorted(trouble[leg]))} during the run")
+            print("\n  Check for binding, a leg fouling its neighbour, or the "
+                  "supply browning out with all coxas starting together.")
+            return 1
+        if args.reps > 1:
+            print(f"\n  {args.reps} rep(s) completed cleanly on "
+                  f"{len(coxas)} coxa(s).")
         return 0
 
     except KeyboardInterrupt:
