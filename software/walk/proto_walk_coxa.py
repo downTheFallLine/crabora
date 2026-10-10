@@ -59,192 +59,25 @@ Requires: pip install feetech-servo-sdk   (provides the scservo_sdk module)
 """
 
 import argparse
-import os
 import sys
-import time
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from gait_lib import (
+    ALL_LEGS, CENTER_POSITION, LEG_NAME, POSITION_TOLERANCE,
+    BusError, PacketHandler,
+    arm, clamp_targets, confirm, find_coxas, find_urt_devices, forward_sign,
+    move_all, open_ports, read_limits, release, report, to_counts, to_degrees,
+)
 
-try:
-    from scservo_sdk import COMM_SUCCESS, PacketHandler, PortHandler
-except ImportError:
-    print("scservo_sdk is not installed.")
-    print("  Install it with:  python3 -m pip install feetech-servo-sdk")
-    sys.exit(1)
 
-from urt_lib import DEFAULT_BAUDRATE, find_urt_devices  # noqa: E402
-
-COXA_JOINT_DIGIT = 1
-ALL_LEGS = (1, 2, 3, 4, 5, 6)
-
-# +1 = counter-clockwise about body +Z moves this foot FORWARD.
-# Right side (1-3) and left side (4-6) are mirrored -- see the module
-# docstring. UNVERIFIED on hardware; --invert flips all six at once.
-FORWARD_SIGN = {1: +1, 2: +1, 3: +1, 4: -1, 5: -1, 6: -1}
-
-LEG_NAME = {
-    1: "front-right", 2: "right", 3: "rear-right",
-    4: "rear-left",   5: "left",  6: "front-left",
-}
-
-CENTER_POSITION = 2048
-COUNTS_PER_REV = 4096
 DEFAULT_ANGLE = 20.0      # degrees either side of centre -- deliberately modest
 DEFAULT_SPEED = 300       # steps/s -- slower than the sweep tests
-MOVE_TIMEOUT = 10.0
-POSITION_TOLERANCE = 20   # counts (~1.8 deg)
-
-ADDR_MIN_ANGLE        = 9
-ADDR_MAX_ANGLE        = 11
-ADDR_TORQUE_ENABLE    = 40
-ADDR_GOAL_POSITION    = 42
-ADDR_GOAL_SPEED       = 46
-ADDR_PRESENT_POSITION = 56
-ADDR_MOVING           = 66
-
-
-class BusError(Exception):
-    pass
-
-
-def to_counts(deg):
-    return round(deg * COUNTS_PER_REV / 360.0)
-
-
-def to_degrees(pos):
-    return (pos - CENTER_POSITION) * 360.0 / COUNTS_PER_REV
-
-
-def read1(packet, port, sid, addr, what):
-    val, comm, _err = packet.read1ByteTxRx(port, sid, addr)
-    if comm != COMM_SUCCESS:
-        raise BusError(f"servo {sid}: {what}: {packet.getTxRxResult(comm)}")
-    return val
-
-
-def read2(packet, port, sid, addr, what):
-    val, comm, _err = packet.read2ByteTxRx(port, sid, addr)
-    if comm != COMM_SUCCESS:
-        raise BusError(f"servo {sid}: {what}: {packet.getTxRxResult(comm)}")
-    return val
-
-
-def write1(packet, port, sid, addr, val, what):
-    comm, _err = packet.write1ByteTxRx(port, sid, addr, val)
-    if comm != COMM_SUCCESS:
-        raise BusError(f"servo {sid}: {what}: {packet.getTxRxResult(comm)}")
-
-
-def write2(packet, port, sid, addr, val, what):
-    comm, _err = packet.write2ByteTxRx(port, sid, addr, val)
-    if comm != COMM_SUCCESS:
-        raise BusError(f"servo {sid}: {what}: {packet.getTxRxResult(comm)}")
-
-
-def open_ports(devices):
-    ports = {}
-    for device in devices:
-        port = PortHandler(device)
-        port.baudrate = DEFAULT_BAUDRATE
-        try:
-            if port.openPort():
-                ports[device] = port
-            else:
-                print(f"  {device}: failed to open")
-        except Exception as e:
-            print(f"  {device}: failed to open ({e})")
-    return ports
-
-
-def find_coxas(packet, ports, legs):
-    """Returns {leg: (sid, port)} for every coxa that answers."""
-    found = {}
-    for leg in legs:
-        sid = leg * 10 + COXA_JOINT_DIGIT
-        for device, port in ports.items():
-            _model, comm, _err = packet.ping(port, sid)
-            if comm == COMM_SUCCESS:
-                found[leg] = (sid, port)
-                print(f"  leg {leg} coxa (servo {sid}): found on {device}")
-                break
-        else:
-            print(f"  leg {leg} coxa (servo {sid}): no answer")
-    return found
-
-
-def move_all(packet, coxas, targets):
-    """Send every coxa to its target and wait. Returns {leg: (pos, timed_out)}."""
-    for leg, (sid, port) in coxas.items():
-        write2(packet, port, sid, ADDR_GOAL_POSITION, targets[leg], "write goal")
-
-    deadline = time.monotonic() + MOVE_TIMEOUT
-    time.sleep(0.05)
-    results = {}
-    pending = set(coxas)
-    while pending:
-        for leg in list(pending):
-            sid, port = coxas[leg]
-            pos = read2(packet, port, sid, ADDR_PRESENT_POSITION, "read position")
-            moving = read1(packet, port, sid, ADDR_MOVING, "read moving flag")
-            results[leg] = (pos, False)
-            if not moving and abs(pos - targets[leg]) <= POSITION_TOLERANCE:
-                pending.discard(leg)
-        if pending and time.monotonic() > deadline:
-            for leg in pending:
-                results[leg] = (results[leg][0], True)
-            break
-        if pending:
-            time.sleep(0.02)
-    return results
-
-
-def report(coxas, targets, results, limits):
-    """Print measured vs commanded for every leg. Returns True if all arrived."""
-    print(f"\n    {'leg':>3} {'servo':>5} {'name':<12} {'target':>7} {'actual':>7} "
-          f"{'err':>5} {'angle':>8}")
-    ok = True
-    for leg in sorted(coxas):
-        sid, _port = coxas[leg]
-        pos, timed_out = results[leg]
-        err = pos - targets[leg]
-        flag = ""
-        if timed_out:
-            ok = False
-            flag = "  ⚠ STALLED"
-        elif abs(err) > POSITION_TOLERANCE:
-            ok = False
-            flag = "  ⚠ off target"
-        lo, hi = limits[leg]
-        if targets[leg] in (lo, hi):
-            flag += "  (at firmware limit)"
-        print(f"    {leg:>3} {sid:>5} {LEG_NAME[leg]:<12} {targets[leg]:>7} "
-              f"{pos:>7} {err:>+5} {to_degrees(pos):>+7.1f}°{flag}")
-    return ok
-
-
-def confirm(question):
-    """Explicit 'y' to continue. Anything else -- including a bare Enter or
-    Ctrl-C -- aborts, so the reflexive response is the safe one."""
-    try:
-        answer = input(f"\n  {question} [y/N] ").strip().lower()
-    except (EOFError, KeyboardInterrupt):
-        print()
-        return False
-    return answer == "y"
 
 
 def plan_targets(coxas, limits, counts, direction, invert):
     """direction: +1 forward, -1 rear, 0 centre. Clamped to firmware limits."""
-    targets, clamped = {}, []
-    for leg in coxas:
-        sign = FORWARD_SIGN[leg] * (-1 if invert else 1)
-        want = CENTER_POSITION + direction * sign * counts
-        lo, hi = limits[leg]
-        got = max(lo, min(hi, want))
-        if got != want:
-            clamped.append((leg, want, got))
-        targets[leg] = got
-    return targets, clamped
+    want = {leg: CENTER_POSITION + direction * forward_sign(leg, invert) * counts
+            for leg in coxas}
+    return clamp_targets(want, limits)
 
 
 def main():
@@ -286,7 +119,7 @@ def main():
           f"{'  [INVERTED]' if args.invert else ''}\n")
     print(f"  {'leg':>3} {'name':<12} {'bearing':>8} {'forward is':>12}")
     for leg in legs:
-        sign = FORWARD_SIGN[leg] * (-1 if args.invert else 1)
+        sign = forward_sign(leg, args.invert)
         bearing = 30 + (leg - 1) * 60
         print(f"  {leg:>3} {LEG_NAME[leg]:<12} {bearing:>7}° "
               f"{('CCW (+)' if sign > 0 else 'CW (-)'):>12}")
@@ -294,7 +127,7 @@ def main():
     if args.dry_run:
         print(f"\n  Nominal targets (before each servo's firmware limits clamp them):")
         for leg in legs:
-            sign = FORWARD_SIGN[leg] * (-1 if args.invert else 1)
+            sign = forward_sign(leg, args.invert)
             print(f"    leg {leg}: forward {CENTER_POSITION + sign * counts}, "
                   f"centre {CENTER_POSITION}, rear {CENTER_POSITION - sign * counts}")
         print("\n  Dry run -- nothing was sent to the bus.")
@@ -325,22 +158,9 @@ def main():
 
         # Firmware limits are the real guard: a joint whose travel was set
         # with set_center.py can never be driven past it from here.
-        limits = {}
         print()
-        for leg, (sid, port) in sorted(coxas.items()):
-            lo = read2(packet, port, sid, ADDR_MIN_ANGLE, "read min limit")
-            hi = read2(packet, port, sid, ADDR_MAX_ANGLE, "read max limit")
-            print(f"  leg {leg} limits {lo}..{hi}  "
-                  f"({to_degrees(lo):+.1f}° .. {to_degrees(hi):+.1f}°)")
-            if lo >= hi or not lo <= CENTER_POSITION <= hi:
-                print(f"\n  Leg {leg} has no usable travel around centre "
-                      f"({lo}..{hi}). Run utils/set_center.py first.")
-                return 1
-            limits[leg] = (lo, hi)
-
-        for leg, (sid, port) in coxas.items():
-            write2(packet, port, sid, ADDR_GOAL_SPEED, args.speed, "write speed")
-            write1(packet, port, sid, ADDR_TORQUE_ENABLE, 1, "enable torque")
+        limits = read_limits(packet, coxas)
+        arm(packet, coxas, args.speed)
 
         trouble = {}   # leg -> {"stalled", "off target"} seen during the run
 
@@ -357,11 +177,15 @@ def main():
             results = move_all(packet, coxas, targets)
             arrived = True
             if verbose:
-                arrived = report(coxas, targets, results, limits)
+                arrived, _bad = report(coxas, targets, results)
                 if not arrived:
                     print("\n  Not every joint reached its target -- "
                           "see the flags above.")
             else:
+                # Compact path: no per-move table, so fold everything worth
+                # knowing into the end-of-run summary instead of losing it.
+                for leg, _want, _got in clamped:
+                    trouble.setdefault(leg, set()).add("clamped by travel limits")
                 for leg, (pos, timed_out) in results.items():
                     if timed_out or abs(pos - targets[leg]) > POSITION_TOLERANCE:
                         arrived = False
@@ -402,7 +226,7 @@ def main():
 
         print("\n  -> CENTRE (finishing)")
         results = move_all(packet, coxas, {leg: CENTER_POSITION for leg in coxas})
-        report(coxas, {leg: CENTER_POSITION for leg in coxas}, results, limits)
+        report(coxas, {leg: CENTER_POSITION for leg in coxas}, results)
 
         if trouble:
             print()
@@ -427,12 +251,7 @@ def main():
         # Always leave the robot limp, whatever happened.
         if coxas:
             print("\n  Releasing torque on all coxas.")
-            for leg, (sid, port) in coxas.items():
-                try:
-                    write1(packet, port, sid, ADDR_TORQUE_ENABLE, 0,
-                           "release torque")
-                except BusError as e:
-                    print(f"    could not release leg {leg}: {e}")
+            release(packet, coxas)
         for port in ports.values():
             port.closePort()
 
