@@ -111,6 +111,30 @@ TRIPOD_B = (2, 4, 6)
 
 
 # =============================================================
+# LINK GEOMETRY  (mm) -- see README.md
+# =============================================================
+# Taken from the CAD and confirmed against the built leg with calipers
+# on 2026-10-11. Distances are between JOINT AXES (the centre of each
+# servo horn), which is the kinematic quantity, not part edges.
+BODY_TO_COXA_AXIS = 163.22   # body centre -> coxa axis, horizontal, along
+                             # the leg's bearing. Derived from the deck:
+                             # apothem 181.825 - setback 5 - cap 52.2/2
+                             # + horn offset 12.5.
+
+# Coxa axis -> femur axis. NOT a simple outboard length: the femur axis is
+# displaced sideways and upwards as well, so the femur/tibia plane is
+# OFFSET from the coxa rotation axis rather than passing through it. The
+# leg is therefore not a textbook planar 2-link chain on a yaw joint --
+# any IK needs the tangent term or it will be quietly wrong.
+COXA_RADIAL   = 58.0         # outboard, along the leg's bearing
+COXA_TANGENT  = 21.0         # sideways, along the femur horn axis
+COXA_VERTICAL = 17.6         # up, above the pan disc bottom
+
+FEMUR_LEN = 100.0            # femur axis -> tibia axis
+TIBIA_LEN = 120.0            # tibia axis -> foot tip
+
+
+# =============================================================
 # UNITS
 # =============================================================
 CENTER_POSITION = 2048

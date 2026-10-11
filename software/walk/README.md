@@ -229,6 +229,44 @@ The outcome to watch for is the two sides *splitting* — legs 1–3
 extending while 4–6 flex. That would mean the tibias are mirrored after
 all. All six moving together in the wrong direction is just a sign flip.
 
+## Link geometry
+
+Read from the CAD and confirmed against the built leg with calipers on
+2026-10-11. All distances are between **joint axes** — the centre of
+each servo horn — which is the kinematic quantity, not part edges.
+They live in `gait_lib.py`.
+
+| Parameter | Value | Meaning |
+|---|---|---|
+| `BODY_TO_COXA_AXIS` | 163.22 mm | body centre → coxa axis, horizontal, along the leg's bearing |
+| `COXA_RADIAL` | 58 mm | coxa axis → femur axis, outboard |
+| `COXA_TANGENT` | 21 mm | coxa axis → femur axis, **sideways** |
+| `COXA_VERTICAL` | 17.6 mm | coxa axis → femur axis, up |
+| `FEMUR_LEN` | 100 mm | femur axis → tibia axis |
+| `TIBIA_LEN` | 120 mm | tibia axis → foot tip |
+
+### The leg is not a planar 2-link chain
+
+Worth flagging because it is easy to get silently wrong: the femur axis
+is **not** directly outboard of the coxa axis. It is displaced 21 mm
+sideways and 17.6 mm up. So the femur/tibia plane is offset from the
+coxa rotation axis rather than passing through it.
+
+Any IK written against the textbook "yaw joint plus planar 2-link"
+model will be subtly wrong — the tangent term has to be carried through.
+The error would be small enough to look like calibration drift, which
+is the worst kind of bug to chase.
+
+### Measuring these again
+
+If a leg revision changes them, there is an easy repeat procedure now
+that the centre conventions are fixed. Command one leg to centre on all
+three joints — coxa neutral, femur horizontal, tibia collinear — and
+**the leg becomes a straight horizontal line from the femur axis out to
+the foot.** Everything is then measurable with a steel rule in one pose,
+with no angles to judge. Measure horn-centre to horn-centre; the central
+horn screw marks the axis.
+
 ## Still undefined
 
 Deliberately not fixed here yet, because they want measuring on the
@@ -239,13 +277,9 @@ assembled robot rather than guessing:
   `software/utils/set_center.py`.
 - **Joint angle signs** — the coxa's and the femur's are settled and
   verified on hardware; the tibia's is predicted but unverified (above).
-- **Link lengths** — coxa offset, femur and tibia, from the current
-  `leg/*/linkage_leg` designs. The old figures (58 / 100 / 120 mm)
-  predate the current leg revision and should be re-read from the
-  design files, not copied forward.
-- **Travel limits** — each joint's safe swing, written into servo
-  firmware with `set_center.py` so a bad command is clamped by the
-  servo itself.
+- ~~Travel limits~~ — set on hardware as of 2026-10-11. Every joint's
+  safe swing is now written into servo firmware, so a bad command is
+  clamped by the servo itself rather than by the calling code.
 
 ## Bring-up order
 
