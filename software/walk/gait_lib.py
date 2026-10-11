@@ -72,10 +72,37 @@ FORWARD_SIGN = {1: +1, 2: +1, 3: +1, 4: -1, 5: -1, 6: -1}
 #      the femurs when the code said "down". Hence -1, not +1.
 FEMUR_UP_SIGN = {leg: -1 for leg in ALL_LEGS}
 
+# +1 = a rising servo count EXTENDS this tibia (straightens the knee,
+# pushing the foot away from the body). -1 means a rising count flexes it.
+#
+# ⚠ UNVERIFIED -- the first guess, same as the femur's was. Two things to
+# expect, based on what the other joints turned out to be:
+#   - It should be UNIFORM across all six, not mirrored. Flexing a knee is
+#     the same physical motion on every leg, exactly as lifting is for the
+#     femur (which was confirmed uniform 2026-10-11). The coxa's mirror
+#     comes from body geometry and has no analogue here.
+#   - The sign may well be -1. The femur's was, and if the tibia servos are
+#     mounted to the same convention, this one will follow.
+# Settle it with proto_walk_tibia.py before any gait code leans on it.
+TIBIA_EXTEND_SIGN = {leg: +1 for leg in ALL_LEGS}
+
 # Femur centre (2048) is the femur HORIZONTAL; envelope is ±90°, straight
 # up to straight down. See README.md -- the envelope is symmetric but the
 # useful range is not, and down is gravity-assisted while up is not.
 FEMUR_MAX_DEFLECTION_DEG = 90.0
+
+# Tibia centre (2048) is the tibia COLLINEAR WITH THE FEMUR -- the leg
+# dead straight, zero knee bend. Decided 2026-10-11; see README.md for
+# why (repeatable calibration against a straightedge, and zero = zero
+# flexion for later IK).
+#
+# A knee only bends one way, so centre sits at the EDGE of useful travel,
+# not the middle: there is almost nothing on the extend side and all of
+# it on the flex side. Code that sweeps this joint symmetrically is the
+# wrong shape -- see TIBIA_DEFAULT_EXTEND_DEG / _FLEX_DEG below.
+TIBIA_EXTEND_LIMIT_DEG = 15.0    # how far past straight it is worth asking for
+TIBIA_FLEX_LIMIT_DEG   = 135.0   # provisional; the real guard is the servo's
+                                 # own firmware limits, set with set_center.py
 
 # Alternating tripods: each has two legs on one side and one on the
 # other, straddling the centre of mass.

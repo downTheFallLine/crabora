@@ -180,16 +180,65 @@ code:
 python3 utils/set_center.py 12 50 25     # leg 1 femur: 50° up, 25° down
 ```
 
+## The tibia
+
+**Centre (2048) is the tibia COLLINEAR WITH THE FEMUR** — the leg dead
+straight, zero knee bend. Decided 2026-10-11.
+
+### Why collinear
+
+The deciding factor is **repeatability across six legs**. Centre is set
+six times by hand with `set_center.py`, and the legs have to match. A
+straight leg can be pressed against a table edge or a straightedge — it
+is physically repeatable, not judged by eye. The alternative (tibia
+perpendicular to the femur) means eyeballing a right angle six times,
+and if leg 3 ends up 5° off leg 1 the robot limps in a way that is
+miserable to trace back.
+
+Secondary: zero knee bend = zero is the standard way to parameterise a
+knee, so the tibia angle is simply "flexion from straight" for any IK
+written later. And it is the same *kind* of reference as
+femur-horizontal — a geometric datum you can verify, not a working pose.
+
+### Travel is one-sided
+
+A knee only bends one way, so **straight is the edge of useful travel,
+not the middle.** There is almost nothing on the extend side and all of
+it on the flex side — roughly 0 to 120–135° of flex. Firmware limits
+will be lopsided (something like 5° extend, 120° flex) and that is
+correct, not a mistake: nothing requires centre to be centred.
+
+The direct consequence is that **code sweeping this joint symmetrically
+is the wrong shape.** `proto_walk_tibia.py` therefore takes separate
+`--extend` and `--flex` angles rather than one `--angle`; a symmetric
+sweep would clamp against the extend limit on every leg, every rep.
+
+### Tibia sign
+
+`TIBIA_EXTEND_SIGN` is +1 everywhere as a first guess, and is the last
+unverified joint sign. Two expectations from the other two joints:
+
+- It should be **uniform across all six**, not mirrored. Flexing a knee
+  is the same physical motion on every leg, exactly as lifting is for
+  the femur (confirmed uniform 2026-10-11). The coxa's mirror comes from
+  body geometry and has no analogue at the knee.
+- It may well be **−1**. The femur's was, and if the tibia servos follow
+  the same mounting convention this one will too.
+
+The outcome to watch for is the two sides *splitting* — legs 1–3
+extending while 4–6 flex. That would mean the tibias are mirrored after
+all. All six moving together in the wrong direction is just a sign flip.
+
 ## Still undefined
 
 Deliberately not fixed here yet, because they want measuring on the
 assembled robot rather than guessing:
 
-- **Joint zero poses** — what physical pose each joint's 2048 centre
-  corresponds to. Settled for the femur (horizontal, above); the tibia
-  is still open. Set with `software/utils/set_center.py`.
-- **Joint angle signs** — the coxa's and the femur's are both settled
-  and verified on hardware (above); the tibia's is open.
+- ~~Joint zero poses~~ — all three are now settled: coxa neutral, femur
+  horizontal, tibia collinear with the femur. Set them with
+  `software/utils/set_center.py`.
+- **Joint angle signs** — the coxa's and the femur's are settled and
+  verified on hardware; the tibia's is predicted but unverified (above).
 - **Link lengths** — coxa offset, femur and tibia, from the current
   `leg/*/linkage_leg` designs. The old figures (58 / 100 / 120 mm)
   predate the current leg revision and should be re-read from the
