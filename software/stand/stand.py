@@ -84,7 +84,15 @@ ADDR_TORQUE_LIMIT = 48
 RECOVERY_TORQUE_PCT = 35      # during collapse and untangle
 LIFT_TORQUE_PCT     = 85      # the stand itself needs real force
 
-BIND_LOAD = 300               # load this high with no motion means bound
+# Thresholds recalibrated against a real run 2026-10-11. A femur holding
+# an outstretched leg against gravity settles 2-5 degrees short at
+# 18-43% load -- that is ordinary servo droop under a cantilever, not a
+# bind, and the original 20-count / 30% thresholds called all of it a
+# fault. A real bind is no movement at near-full load.
+BIND_LOAD = 600               # 60% of scale, against an 85% torque limit
+LOADED_TOLERANCE = 60         # counts (~5 deg) allowed when a joint is
+                              # holding weight; the free-movement
+                              # POSITION_TOLERANCE is far too tight there
 SHAKE_AMPLITUDES = (3.0, 6.0, 12.0)   # degrees, escalating
 SHAKE_CYCLES = 3
 LIFT_STEPS = 6                # interpolation steps, lifted -> standing
@@ -412,9 +420,12 @@ def phase_stand(packet, joints, legs, limits, height, foot_out, dry,
                     targets[(leg, d)] = clamp(counts[d], limits[(leg, d)])
         results = move_group(packet, group, targets)
         bad = [k for k, (pos, to) in results.items()
-               if to or abs(pos - targets[k]) > POSITION_TOLERANCE]
+               if to or abs(pos - targets[k]) > LOADED_TOLERANCE]
+        droop = max((abs(results[k][0] - targets[k]) for k in results),
+                    default=0)
         print(f"  step {step}/{LIFT_STEPS}  femur {mid['femur']:+6.1f}°  "
-              f"flex {mid['tibia']:5.1f}°" + ("  ✗" if bad else ""))
+              f"flex {mid['tibia']:5.1f}°   worst sag {droop:>2} counts "
+              f"({droop * 360 / 4096:.1f}°)" + ("  ✗" if bad else ""))
         for (leg, d) in bad:
             sid, port = group[(leg, d)]
             pos, _timed_out = results[(leg, d)]
@@ -443,9 +454,11 @@ def main():
     ap.add_argument("--foot-out", type=float, default=120.0,
                     help="how far outboard of the knee to plant the foot, mm "
                          "(default 120; wider is more stable, less range)")
-    ap.add_argument("--compact-clear", type=float, default=70.0,
+    ap.add_argument("--compact-clear", type=float, default=60.0,
                     help="ground clearance for the lifted leg during untangle, "
-                         "mm (default 70). Raise if a leg does not swing "
+                         "mm (default 60, which needs about +56 deg of "
+                         "femur and so fits a +60 limit). Raise if a leg "
+                         "does not swing "
                          "cleanly; the femur angle rises with it.")
     ap.add_argument("--compact-out", type=float, default=140.0,
                     help="how far out from the knee to hold the foot while "
@@ -548,11 +561,11 @@ def main():
                     # femur lift is NEGATIVE counts, so the min limit is
                     # what caps how high the leg can be raised
                     can_lift = -to_degrees(lo)
-                    if can_lift < need["femur"]:
+                    if can_lift < need["femur"] - 1.0:
                         tight.append((leg, "femur", can_lift, need["femur"]))
                 if d == TIBIA_JOINT_DIGIT:
                     can_flex = -to_degrees(lo)
-                    if can_flex < need["tibia"]:
+                    if can_flex < need["tibia"] - 1.0:
                         tight.append((leg, "tibia", can_flex, need["tibia"]))
             print(f"  {leg:>3}  " + "  ".join(cells))
 

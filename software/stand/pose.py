@@ -210,7 +210,7 @@ def safe_sequence(start, end, margin=10.0):
     return None
 
 
-def pose_compact(out=140.0, ground_clear=70.0):
+def pose_compact(out=140.0, ground_clear=60.0):
     """Leg drawn in and lifted clear: the foot pulled to `out` from the
     femur axis and held `ground_clear` mm above the floor. This is what
     a leg is put into BEFORE its coxa rotates, so a short stub sweeps
