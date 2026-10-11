@@ -138,8 +138,14 @@ def set_torque_limit(packet, servos, pct):
     return ok
 
 
-def move_group(packet, group, targets):
+def move_group(packet, group, targets, tolerance=POSITION_TOLERANCE):
     """Write every goal first, then wait for all of them.
+
+    `tolerance` is how close counts as arrived. Under load a joint
+    settles a few degrees short and never reaches the tight
+    free-movement figure, so a loaded phase must pass its own value --
+    otherwise every joint waits out the full timeout and is reported as
+    stalled when it is simply holding weight.
 
     `group` is {key: (sid, port)}; `targets` is {key: counts}. Writing
     all the goals before waiting is what makes a multi-joint move
@@ -157,7 +163,7 @@ def move_group(packet, group, targets):
             pos = read2(packet, port, sid, ADDR_PRESENT_POSITION, "position")
             moving = read1(packet, port, sid, ADDR_MOVING, "moving")
             results[key] = (pos, False)
-            if not moving and abs(pos - targets[key]) <= POSITION_TOLERANCE:
+            if not moving and abs(pos - targets[key]) <= tolerance:
                 pending.discard(key)
         if pending and time.monotonic() > deadline:
             for key in pending:
@@ -418,7 +424,7 @@ def phase_stand(packet, joints, legs, limits, height, foot_out, dry,
                 if leg in joints[d]:
                     group[(leg, d)] = joints[d][leg]
                     targets[(leg, d)] = clamp(counts[d], limits[(leg, d)])
-        results = move_group(packet, group, targets)
+        results = move_group(packet, group, targets, LOADED_TOLERANCE)
         bad = [k for k, (pos, to) in results.items()
                if to or abs(pos - targets[k]) > LOADED_TOLERANCE]
         droop = max((abs(results[k][0] - targets[k]) for k in results),
