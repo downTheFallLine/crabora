@@ -519,8 +519,6 @@ def main():
         if not legs:
             print("\nNo usable legs. Stopping.")
             return 1
-        if args.phase == "survey":
-            return 1 if excluded else 0
 
         limits = {}
         for leg in legs:
@@ -530,6 +528,48 @@ def main():
                     limits[(leg, d)] = (
                         read2(packet, port, sid, ADDR_MIN_ANGLE, "min"),
                         read2(packet, port, sid, ADDR_MAX_ANGLE, "max"))
+
+        # Travel limits are the usual reason a recovery stalls, so report
+        # them here rather than only inside the preflight -- --phase survey
+        # is what people reach for when asking "can this even work?".
+        need = pose_compact(args.compact_out, args.compact_clear)
+        print(f"\n  Travel limits  (degrees from centre)")
+        print(f"  {'leg':>3}  {'coxa':>16}  {'femur':>16}  {'tibia':>16}")
+        tight = []
+        for leg in legs:
+            cells = []
+            for d, jname in JOINTS:
+                if (leg, d) not in limits:
+                    cells.append(f"{'--':>16}")
+                    continue
+                lo, hi = limits[(leg, d)]
+                cells.append(f"{to_degrees(lo):+7.0f}..{to_degrees(hi):+6.0f}")
+                if d == FEMUR_JOINT_DIGIT:
+                    # femur lift is NEGATIVE counts, so the min limit is
+                    # what caps how high the leg can be raised
+                    can_lift = -to_degrees(lo)
+                    if can_lift < need["femur"]:
+                        tight.append((leg, "femur", can_lift, need["femur"]))
+                if d == TIBIA_JOINT_DIGIT:
+                    can_flex = -to_degrees(lo)
+                    if can_flex < need["tibia"]:
+                        tight.append((leg, "tibia", can_flex, need["tibia"]))
+            print(f"  {leg:>3}  " + "  ".join(cells))
+
+        if tight:
+            print(f"\n  ⚠ Not enough travel for the recovery poses:")
+            for leg, jname, got, want in tight:
+                print(f"      leg {leg} {jname}: reaches {got:+.0f}°, "
+                      f"needs {want:+.0f}°")
+            print(f"    A leg that cannot lift clear will be REFUSED rather")
+            print(f"    than dragged. Widen with utils/set_center.py.")
+        else:
+            print(f"\n  Travel is sufficient for the recovery poses "
+                  f"(femur needs +{need['femur']:.0f}°, "
+                  f"tibia flex {need['tibia']:.0f}°).")
+
+        if args.phase == "survey":
+            return 1 if (excluded or tight) else 0
 
         for sid, port in all_servos:
             write2(packet, port, sid, ADDR_GOAL_SPEED, args.speed, "speed")
