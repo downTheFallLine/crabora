@@ -119,7 +119,7 @@ def pose_splay():
     return {"coxa": 0.0, "femur": 0.0, "tibia": 0.0}
 
 
-def pose_compact(out=140.0, ground_clear=30.0):
+def pose_compact(out=140.0, ground_clear=70.0):
     """Leg drawn in and lifted clear: the foot pulled to `out` from the
     femur axis and held `ground_clear` mm above the floor. This is what
     a leg is put into BEFORE its coxa rotates, so a short stub sweeps
@@ -132,10 +132,14 @@ def pose_compact(out=140.0, ground_clear=30.0):
     lifted but puts the foot on the floor, because flexion bends the
     foot DOWN from the femur's direction.
 
-    Defaults chosen to keep the femur well inside its travel: asking the
-    foot ABOVE the femur axis needs femur angles near +88, at the very
-    edge of the +/-90 envelope and probably outside the firmware limits.
-    Clearing the floor by 30 mm only needs about +52."""
+    ground_clear was raised 30 -> 70 mm on 2026-10-11: on hardware, 30 mm
+    did not lift the femur enough for the leg to swing cleanly. At
+    out=140 that moves the femur from +52 to +67, putting the foot 27 mm
+    ABOVE the femur axis rather than 13 below. Tunable from stand.py.
+
+    Do not push this much further at a small `out`: asking for a lot of
+    height close in needs femur angles near +90, at the edge of the
+    envelope and likely outside the firmware limits."""
     femur, tibia = leg_ik(out=out, down=BELLY_DROP + COXA_VERTICAL - ground_clear)
     return {"coxa": 0.0, "femur": femur, "tibia": tibia}
 

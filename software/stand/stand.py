@@ -250,10 +250,11 @@ def phase_collapse(packet, joints, legs, limits, dry):
     return trouble
 
 
-def phase_untangle(packet, joints, legs, limits, dry, shake_enabled=True):
+def phase_untangle(packet, joints, legs, limits, dry, shake_enabled=True,
+                   compact_out=140.0, compact_clear=70.0):
     """One leg at a time: compact, rotate coxa to centre, set down."""
     print("\n=== UNTANGLE (one leg at a time) ===")
-    compact = pose_counts(pose_compact())
+    compact = pose_counts(pose_compact(compact_out, compact_clear))
     tuck = pose_counts(pose_tuck())
     failed = []
     for leg in legs:
@@ -377,6 +378,14 @@ def main():
     ap.add_argument("--foot-out", type=float, default=120.0,
                     help="how far outboard of the knee to plant the foot, mm "
                          "(default 120; wider is more stable, less range)")
+    ap.add_argument("--compact-clear", type=float, default=70.0,
+                    help="ground clearance for the lifted leg during untangle, "
+                         "mm (default 70). Raise if a leg does not swing "
+                         "cleanly; the femur angle rises with it.")
+    ap.add_argument("--compact-out", type=float, default=140.0,
+                    help="how far out from the knee to hold the foot while "
+                         "compact, mm (default 140). Smaller is more tucked "
+                         "in but needs a steeper femur.")
     ap.add_argument("--speed", type=int, default=200,
                     help="move speed in steps/s (default 200 -- slow on purpose)")
     ap.add_argument("--legs", type=int, nargs="+", default=list(ALL_LEGS))
@@ -401,7 +410,9 @@ def main():
     print("  ⚠ tibia sign is ASSUMED, not verified -- test stand only\n")
 
     if args.dry_run:
-        for name, p in (("splay", pose_splay()), ("compact", pose_compact()),
+        for name, p in (("splay", pose_splay()),
+                        ("compact", pose_compact(args.compact_out,
+                                                 args.compact_clear)),
                         ("tuck", pose_tuck())):
             c = pose_counts(p)
             print(f"  {name:<8} coxa {c[COXA_JOINT_DIGIT]}  "
@@ -464,7 +475,9 @@ def main():
         # and the robot quietly never reaches the pose. Say so first.
         print("\n  Preflight -- can the travel limits reach each pose?")
         blocked = False
-        checks = [("splay", pose_splay()), ("compact", pose_compact()),
+        checks = [("splay", pose_splay()),
+                  ("compact", pose_compact(args.compact_out,
+                                           args.compact_clear)),
                   ("tuck", pose_tuck())]
         try:
             checks.append(("stand", pose_stand(args.height, args.foot_out)))
@@ -521,7 +534,8 @@ def main():
                 print("\n  Stopped.")
                 return 1
             failed = phase_untangle(packet, joints, legs, limits, False,
-                                    args.shake)
+                                    args.shake, args.compact_out,
+                                    args.compact_clear)
             for leg in failed:
                 trouble.setdefault(leg, []).append("could not be untangled")
             legs = [l for l in legs if l not in failed]
