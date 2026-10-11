@@ -116,15 +116,77 @@ opposing as intended and no `--invert` needed. `FORWARD_SIGN` in
 `gait_lib.py` is correct as written. `--invert` stays as a diagnostic:
 if a later run needs it, a servo has been remounted.
 
+## The femur
+
+**Centre (2048) is the femur horizontal**, and the travel envelope is
+**±90°** — straight up to straight down. Decided 2026-10-10.
+
+### Why centre is horizontal
+
+The alternative was centre = the neutral stance pose, which makes gait
+maths read naturally (swing is a positive offset from zero) at the cost
+of lopsided limits. Horizontal was chosen instead: it is a pose you can
+identify by eye when calibrating, it is geometrically easy to reason
+about, and it makes the limits symmetric. The price is that every stance
+command carries a constant offset from centre.
+
+### Up and down are not the same job
+
+Unlike the coxa — where forward and rear are the same action mirrored,
+so symmetric travel is natural — the femur's two directions do different
+work:
+
+- **Up** — swing clearance (small, 15–25°), and folding into a tuck or
+  park pose (large). Also how the robot gets up from a collapsed start.
+- **Down** — raises the body above neutral ride height. Useful range
+  runs out quickly: as the femur drops the leg straightens, the foot
+  pulls inward, and mechanical advantage falls away.
+
+So although the *envelope* is symmetric at ±90°, the *useful* range is
+not, and gait code should not assume that +30° and −30° are equally
+available or equally cheap. Down is also gravity-assisted while up works
+against the leg's weight, so the two directions differ in torque and in
+how a move settles.
+
+### Femur sign — a prediction, not yet verified
+
+The coxa mirror comes from **body geometry**: legs 1 and 6 point
+different ways, so "forward" is opposite rotations. The femur has no
+equivalent — *lift is the same physical motion on every leg.*
+
+So if the femur servos are all mounted the same way round relative to
+their own leg, the femur sign should be **uniform across all six legs,
+not mirrored like the coxa.** `FEMUR_UP_SIGN` in `gait_lib.py` encodes
+that as +1 everywhere.
+
+⚠ This is reasoning, not measurement. Confirm it on two legs — one from
+each side — before any gait code depends on it. If the two sides turn
+out to disagree, the femurs are mirrored after all and the table needs
+per-side signs like the coxa's.
+
+### Travel limits
+
+Pick them from the hardware, not from this document. With torque off,
+swing each femur by hand through its full range and find where it
+actually fouls — cap against coxa body, tibia against femur, leg against
+neighbour — then set limits a few degrees inside that. `set_center.py`
+takes independent left/right values, so asymmetric limits need no new
+code:
+
+```
+python3 utils/set_center.py 12 50 25     # leg 1 femur: 50° up, 25° down
+```
+
 ## Still undefined
 
 Deliberately not fixed here yet, because they want measuring on the
 assembled robot rather than guessing:
 
 - **Joint zero poses** — what physical pose each joint's 2048 centre
-  corresponds to, per joint. Set with `software/utils/set_center.py`.
-- **Joint angle signs** — which way positive goes for femur and tibia.
-  The coxa's, including the per-side mirror, is settled (above).
+  corresponds to. Settled for the femur (horizontal, above); the tibia
+  is still open. Set with `software/utils/set_center.py`.
+- **Joint angle signs** — the coxa's is settled and verified (above);
+  the femur's is predicted but unverified (above); the tibia's is open.
 - **Link lengths** — coxa offset, femur and tibia, from the current
   `leg/*/linkage_leg` designs. The old figures (58 / 100 / 120 mm)
   predate the current leg revision and should be re-read from the

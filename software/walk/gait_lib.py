@@ -30,7 +30,12 @@ from urt_lib import DEFAULT_BAUDRATE, find_urt_devices  # noqa: F401,E402
 # GEOMETRY  (see README.md)
 # =============================================================
 ALL_LEGS = (1, 2, 3, 4, 5, 6)
-COXA_JOINT_DIGIT = 1
+
+# Second digit of the servo ID (see project README): 1 coxa, 2 femur, 3 tibia.
+COXA_JOINT_DIGIT  = 1
+FEMUR_JOINT_DIGIT = 2
+TIBIA_JOINT_DIGIT = 3
+JOINT_NAME = {1: "coxa", 2: "femur", 3: "tibia"}
 
 # Bearing clockwise from the front point (the hexagon vertex between
 # legs 1 and 6): leg n sits at 30 + (n-1)*60 degrees.
@@ -54,6 +59,24 @@ LEG_NAME = {
 # the wrong way, they are mounted inconsistently -- fix that in hardware
 # rather than patching individual legs here.
 FORWARD_SIGN = {1: +1, 2: +1, 3: +1, 4: -1, 5: -1, 6: -1}
+
+# +1 = a rising servo count lifts this femur UP.
+#
+# Unlike the coxa, this is NOT expected to be mirrored: the coxa's mirror
+# comes from body geometry (legs 1 and 6 point different ways, so forward
+# is opposite rotations), whereas lift is the same physical motion on
+# every leg. So if all femur servos are mounted the same way round
+# relative to their own leg, one sign serves all six.
+#
+# ⚠ PREDICTED, NOT MEASURED. Confirm on two legs -- one per side -- before
+# any gait code leans on it. If the sides disagree, the femurs ARE
+# mirrored and this needs per-side signs like FORWARD_SIGN above.
+FEMUR_UP_SIGN = {leg: +1 for leg in ALL_LEGS}
+
+# Femur centre (2048) is the femur HORIZONTAL; envelope is ±90°, straight
+# up to straight down. See README.md -- the envelope is symmetric but the
+# useful range is not, and down is gravity-assisted while up is not.
+FEMUR_MAX_DEFLECTION_DEG = 90.0
 
 # Alternating tripods: each has two legs on one side and one on the
 # other, straddling the centre of mass.
@@ -144,26 +167,32 @@ def open_ports(devices):
     return ports
 
 
-def find_coxas(packet, ports, legs, quiet=False):
-    """Ping each leg's coxa on every open port. Returns {leg: (sid, port)}."""
+def find_joints(packet, ports, legs, joint=COXA_JOINT_DIGIT, quiet=False):
+    """Ping one joint of each leg on every open port. Returns {leg: (sid, port)}."""
     found = {}
+    name = JOINT_NAME[joint]
     for leg in legs:
-        sid = leg * 10 + COXA_JOINT_DIGIT
+        sid = leg * 10 + joint
         for device, port in ports.items():
             _model, comm, _err = packet.ping(port, sid)
             if comm == COMM_SUCCESS:
                 found[leg] = (sid, port)
                 if not quiet:
-                    print(f"  leg {leg} coxa (servo {sid}): found on {device}")
+                    print(f"  leg {leg} {name} (servo {sid}): found on {device}")
                 break
         else:
             if not quiet:
-                print(f"  leg {leg} coxa (servo {sid}): no answer")
+                print(f"  leg {leg} {name} (servo {sid}): no answer")
     return found
 
 
+def find_coxas(packet, ports, legs, quiet=False):
+    """Back-compat wrapper: find_joints() restricted to the coxas."""
+    return find_joints(packet, ports, legs, COXA_JOINT_DIGIT, quiet)
+
+
 def read_limits(packet, coxas, verbose=True):
-    """Read each coxa's firmware angle limits. Returns {leg: (lo, hi)}.
+    """Read each joint's firmware angle limits. Returns {leg: (lo, hi)}.
 
     Raises BusError if a joint has no usable travel around centre -- that
     means set_center.py hasn't been run on it, and nothing should move.
