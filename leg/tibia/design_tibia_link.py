@@ -11,7 +11,7 @@ transitions SMOOTHLY from the disc into the tapered body -- no "notch"
 or step where the disc meets the beam (which v1 had, because v1 was a
 union of a disc + rectangular beam, leaving a 90-deg step at the disc
 edge).  The whole link tapers continuously from KNEE_DISC_DIA wide at
-the knee to FOOT_WIDTH wide at the foot, ending in a SQUARED flat edge
+the knee to FOOT_WIDTH wide at the foot, ending in a ROUNDED tip
 (v1 ended in a semicircular tip).
 
 Knee end:
@@ -23,7 +23,7 @@ Body:
   - Continuous taper from the disc to the foot, no rectangular beam
     section.  5 mm thick (bumped from v1's 3 mm to match the femur
     link strength upgrade).
-  - Warren-truss lightening: N_TRUSS triangles in the body region,
+  - Warren-truss lightening: DISABLED in v3 (N_TRUSS=0).  Was N_TRUSS triangles in the body region,
     alternating apex up/down.  Each triangle auto-scales to the local
     half-width of the tapered outline, so they get smaller toward the
     foot.  The tibia link sees mostly axial (compression) load when
@@ -32,7 +32,7 @@ Body:
     concern here.
 
 Foot end:
-  - Flat squared edge, FOOT_WIDTH mm wide (default 10 mm).  Foot tip =
+  - Rounded tip, FOOT_WIDTH mm across (default 10 mm).  Foot tip =
     the +X edge of the link = the ground-contact line in the leg's
     vertical plane.
   - For better grip on smooth surfaces, glue a rubber pad / silicone
@@ -66,7 +66,7 @@ KNEE_DISC_DIA         = 32.0
 LINK_THK              = 5.0        # was 3.0; bumped to match the femur-link v2
                                    # strength upgrade (bending strength ~thk^2).
 
-# Foot end: flat squared edge of this width at X=LINK_LEN.
+# Foot end: ROUNDED tip of this diameter, tip at X=LINK_LEN.
 # v1 had a semicircular tip of radius BEAM_WIDTH/2 = 12 mm (so the foot
 # was effectively 24 mm wide and rounded).  v2 tapers to a narrow flat
 # edge.  10 mm is a moderate taper from the 32 mm disc.
@@ -82,7 +82,11 @@ HORN_CENTRAL_CLEAR    = 8.0    # Φ8 relief for the horn's central M3 + head
 # the taper, so they shrink toward the foot.  TRUSS_X_LO/HI bound the
 # region: LO sits past the horn-bolt circle, HI stays clear of the
 # narrow foot end.  N_TRUSS=0 disables the truss (solid body).
-N_TRUSS               = 5
+# v3 (2026-10-11): truss disabled. The open triangles removed material
+# from the middle of the link, which is exactly where bending stress
+# peaks, and a tibia broke. Solid is heavier but the leg is not mass
+# critical -- the servo is.
+N_TRUSS               = 0
 TRUSS_MARGIN          = 2.0    # min wall between adjacent triangle cells
 TRUSS_CHORD_MARGIN    = 2.5    # min wall between triangle vertex and link edge
 TRUSS_X_LO            = 12.0   # X where the truss region starts
@@ -142,7 +146,30 @@ def tangent_point_geometry(disc_radius, link_len, foot_y):
 
 def teardrop_outline(disc_radius, link_len, foot_width, n_arc):
     """2D outline of the tibia link: knee disc smoothly tapering to a
-    flat foot edge of width foot_width at X=link_len.
+    ROUNDED foot tip of radius foot_width/2, with the tip at X=link_len.
+
+    v3 (2026-10-11): the foot was a flat squared edge and caught on the
+    floor hard enough to snap a tibia. A round tip presents a tangent to
+    the ground through the whole swing instead of a corner, so the leg
+    skids rather than digging in.
+
+    Construction is simply the convex hull of two circles -- the knee
+    disc at the origin and the foot circle at (link_len - r, 0). That
+    yields the two tangent flanks and both arcs exactly, with no tangent
+    trigonometry to get wrong. The tip stays at X=link_len, so
+    TIBIA_LEN=120 in walk/gait_lib.py remains the knee-axis-to-foot-tip
+    distance and the kinematics are unaffected.
+    """
+    r = foot_width / 2.0
+    quad = max(8, n_arc // 4)
+    disc = shapely.geometry.Point(0.0, 0.0).buffer(disc_radius, quad_segs=quad)
+    foot = shapely.geometry.Point(link_len - r, 0.0).buffer(r, quad_segs=quad)
+    poly = disc.union(foot).convex_hull
+    return shapely.geometry.polygon.orient(poly, sign=1.0)
+
+
+def _unused_squared_outline(disc_radius, link_len, foot_width, n_arc):
+    """Superseded v2 outline, kept only as a record of the flat foot.
 
     Construction: each foot corner has two tangent lines to the disc
     (circle of radius disc_radius at the origin); we use the tangent
@@ -313,7 +340,7 @@ def render_png(link, path):
         ax.set_title(title, color=fg, fontsize=11)
 
     fig.suptitle(
-        f"CRABORA tibia link  v2  (teardrop, squared foot)  -  "
+        f"CRABORA tibia link  v3  (teardrop, rounded foot, solid)  -  "
         f"{LINK_LEN:.0f} mm knee-to-foot,  "
         f"Φ{KNEE_DISC_DIA:.0f} disc -> {FOOT_WIDTH:.0f} mm foot,  "
         f"{LINK_THK:.0f} mm thick",
@@ -327,7 +354,7 @@ def render_png(link, path):
 # =============================================================
 def main():
     os.makedirs(OUT_DIR, exist_ok=True)
-    print("Building tibia link v2 (teardrop, squared foot)...")
+    print("Building tibia link v3 (teardrop, rounded foot, solid)...")
     link = build_link()
     e = link.extents
     vol = link.volume / 1000.0
@@ -336,12 +363,12 @@ def main():
     print(f"  length    : {LINK_LEN:.0f} mm (tibia horn axis -> foot tip)")
     truss_note = (f"{N_TRUSS} truss triangles (auto-scaled X={TRUSS_X_LO:.0f}..{TRUSS_X_HI:.0f})"
                   if N_TRUSS > 0 else "solid (no truss)")
-    print(f"  taper     : Φ{KNEE_DISC_DIA:.0f} disc -> {FOOT_WIDTH:.0f} mm "
-          f"flat foot,  {LINK_THK:.0f} mm thick,  {truss_note}")
+    print(f"  taper     : Φ{KNEE_DISC_DIA:.0f} disc -> Φ{FOOT_WIDTH:.0f} mm rounded tip, "
+          f"{LINK_THK:.0f} mm thick,  {truss_note}")
     print(f"  knee      : Φ{KNEE_DISC_DIA:.0f} disc, 4 M3 horn bolts on "
           f"{HORN_BOLT_SQUARE:.0f} mm square + Φ{HORN_CENTRAL_CLEAR:.0f} central relief,  "
           f"tangent-blended into body (no notch)")
-    print(f"  foot      : flat squared edge, {FOOT_WIDTH:.0f} mm wide  "
+    print(f"  foot      : ROUNDED tip, Φ{FOOT_WIDTH:.0f} mm  "
           f"(glue rubber pad post-print for grip)")
 
     link.export(STL_PATH)
