@@ -140,9 +140,25 @@ python3 ../walk/proto_walk_tibia.py --legs 1 4 --flex 20
 
 ## Layout
 
-- `survey.py` — phase 0. Reads all 18 joints, computes foot positions,
-  flags binds, latched errors and out-of-range joints. Moves nothing.
-- *(to come)* `collapse.py`, `untangle.py`, `stand_up.py`
+- `survey.py` — phase 0 standalone. Reads all 18 joints, computes foot
+  positions, flags binds, latched errors and out-of-range joints.
+  Moves nothing.
+- `pose.py` — leg kinematics: two-link IK in the leg's vertical plane,
+  its inverse, and the named poses (splay, compact, tuck, stand). Pure
+  geometry, no bus; run it directly for a self-check.
+- `stand.py` — the recovery itself, all four phases. `--phase` runs one
+  at a time, `--dry-run` prints the plan without touching the bus.
+
+### Travel limits must be generous
+
+The recovery poses need far more travel than a gait does — `tuck` alone
+is about 56° of femur lift and 129° of tibia flex. `stand.py` runs a
+**preflight check** that compares every pose against the firmware limits
+it reads, and names each joint that would clamp, before anything moves.
+
+If that check reports clamping, widen the limits with `set_center.py`.
+Otherwise the robot stops short at every pose and the stand quietly
+never completes.
 
 Geometry, signs and bus plumbing are imported from `walk/gait_lib.py`,
 so "which way is forward" stays defined in exactly one place. That makes
