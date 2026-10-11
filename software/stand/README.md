@@ -55,12 +55,20 @@ a state where nothing you do can topple anything.
 unknown configuration is six chances for neighbours to fight each other.
 One at a time avoids it entirely, and keeps current draw trivial.
 
-**Within a leg: retract, rotate, extend.**
+**Within a leg: LIFT first, then fold.**
 
-1. **Flex the tibia** — fold the foot in, making the leg as short as
-   possible. This pulls the foot in from ~440 mm radial to ~260 mm,
-   which is what buys the clearance from the neighbouring leg.
-2. **Lift the femur** — clear of the ground and the body.
+⚠ This ordering was wrong in the first version of this document, and it
+broke a tibia on 2026-10-11. The original text said "flex the tibia,
+then lift the femur". Do not restore it. With the body belly-down the
+floor sits **62.6 mm below the femur axis**, and flexing a tibia while
+the femur is horizontal swings the foot *downward* — 100° of flex puts
+it 118 mm down, i.e. 56 mm into the floor. The servo pushes until
+something gives.
+
+1. **Lift the femur** — clear of the ground and the body. Raising is
+   always safe; it can only move a foot away from the floor.
+2. **Flex the tibia** — fold the foot in, making the leg short. Safe
+   now, because the knee is already high.
 3. **Rotate the coxa** to its target bearing — now a short stub is
    sweeping, not a long lever that clips its neighbours.
 4. **Extend** femur and tibia to place the foot.
@@ -71,6 +79,32 @@ Compact-then-rotate is the whole trick.
 The target is a known **tuck pose**: foot on the ground, out to the
 side, roughly under the hip, body still on its belly. Once all six are
 tucked, standing is a planned motion rather than a recovery.
+
+### 3a. Never plan a joint order by intuition
+
+The tibia breakage came from ordering joints by what sounded sensible.
+The geometry does not care what sounds sensible. `pose.py` therefore
+provides the check and the planner:
+
+- `foot_height(femur, flex)` — height above the floor, belly-down
+- `floor_strikes(a, b)` — samples the path the servos actually take
+  between two poses and returns every point that would hit. Note the
+  servos move at equal *count* rate, so the joint with less travel
+  arrives first and waits; that is not a straight line in joint space,
+  and the difference is exactly what bit us.
+- `safe_sequence(a, b)` — waypoints that avoid a strike, or `None` if
+  it cannot find any, in which case the caller must stop rather than
+  issue the move anyway.
+
+A leg already reading as underground is not an error — it means the body
+is not resting where the model assumes, or the leg is propping it up. So
+the rule is **never go lower than you started**, not "always stay above
+the floor".
+
+`collapse` uses a fixed safe order for this reason: raise every femur to
+at least 45° (reading each one first, so it only ever *raises*),
+straighten the tibias while they are up there, and lower the femurs
+last.
 
 ### 4. Binds, and the shake
 
@@ -114,6 +148,7 @@ reflects that something was left behind.
 | | Status |
 |---|---|
 | Travel limits in servo firmware | ✓ set 2026-10-11 |
+| Belly-down ride height | ✓ measured: coxa horn 45 mm above floor |
 | Link lengths | ✓ confirmed with calipers 2026-10-11 |
 | Coxa sign | ✓ verified on hardware |
 | Femur sign | ✓ verified on hardware |

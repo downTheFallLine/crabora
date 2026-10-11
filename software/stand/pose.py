@@ -44,9 +44,17 @@ KNEE_RADIUS = BODY_TO_COXA_AXIS + COXA_RADIAL     # 221.22 mm
 STRAIGHT_REACH = FEMUR_LEN + TIBIA_LEN            # 220.0 mm
 MIN_REACH = abs(FEMUR_LEN - TIBIA_LEN)            # 20.0 mm
 
-# How far below the deck plate the body actually rests when belly-down.
-# The flanged deck hangs FLANGE_DEPTH below the plate underside.
-BELLY_DROP = 25.0
+# Height of the COXA HORN above the floor with the body belly-down and
+# the legs splayed. MEASURED by Tom 2026-10-11 as 45 mm; the previous
+# value was inferred from the deck flange depth and was 20 mm too small,
+# which made every computed ground clearance optimistic.
+BELLY_COXA_HEIGHT = 45.0
+
+# The floor, expressed where the IK works from: below the femur axis.
+GROUND_BELOW_FEMUR = BELLY_COXA_HEIGHT + COXA_VERTICAL     # 62.6 mm
+
+# Kept as an alias so older call sites still read sensibly.
+BELLY_DROP = BELLY_COXA_HEIGHT
 
 
 class Unreachable(ValueError):
@@ -119,6 +127,89 @@ def pose_splay():
     return {"coxa": 0.0, "femur": 0.0, "tibia": 0.0}
 
 
+def foot_height(femur_up_deg, tibia_flex_deg):
+    """Height of the foot above the FLOOR, body belly-down. Negative
+    means the leg is being driven into the ground."""
+    _out, down = leg_fk(femur_up_deg, tibia_flex_deg)
+    return GROUND_BELOW_FEMUR - down
+
+
+def sweep_path(start, end, steps=40):
+    """Sample the joint path the servos actually take between two poses.
+
+    They move at the same count rate, so the joint with less travel
+    arrives FIRST and then holds while the other catches up. That is not
+    a straight line in joint space, and the difference matters: it is
+    what put a foot through the floor on 2026-10-11.
+    """
+    df = end["femur"] - start["femur"]
+    dt = end["tibia"] - start["tibia"]
+    span = max(abs(df), abs(dt)) or 1.0
+    for i in range(steps + 1):
+        travelled = span * i / steps
+        f = start["femur"] + max(-travelled, min(travelled, df))
+        t = start["tibia"] + max(-travelled, min(travelled, dt))
+        yield f, t
+
+
+def floor_strikes(start, end, margin=10.0, steps=40):
+    """Points along start->end where the foot would hit the floor.
+
+    Returns [(femur, tibia, height)] for every sampled pose with less
+    than `margin` mm of clearance. Empty means the move is safe.
+    """
+    return [(f, t, h) for f, t in sweep_path(start, end, steps)
+            if (h := foot_height(f, t)) < margin]
+
+
+SAFE_LIFTS = (45.0, 60.0, 70.0, 80.0)   # femur angles to try as a waypoint
+
+
+def safe_sequence(start, end, margin=10.0):
+    """Waypoints from `start` to `end` that never put the foot through
+    the floor, assuming the body stays belly-down.
+
+    Returns a list of poses to move through in order, or None if no safe
+    route was found -- in which case the caller must stop and say so
+    rather than issuing the move anyway.
+
+    Why this exists: on 2026-10-11 the collapse phase lowered femurs to
+    horizontal while tibias were still flexed. With the floor 62.6 mm
+    below the femur axis, as little as 40 degrees of residual flex puts
+    the foot 15 mm underground; the servo then pushes until something
+    breaks, and a tibia duly snapped. Ordering joints by intuition is
+    not good enough -- the path has to be checked.
+    """
+    # The leg may ALREADY be below the margin -- a foot reading as
+    # underground just means the body is not really resting where the
+    # model assumes, or the leg is propping it up. You cannot un-be
+    # there, so the rule is "never go lower than you started", not
+    # "always stay above the margin".
+    allow = min(margin, foot_height(start["femur"], start["tibia"]))
+
+    def clear(a, b):
+        return not floor_strikes(a, b, allow)
+
+    if clear(start, end):
+        return [end]
+
+    # Lift the femur clear first, carrying the tibia wherever it is.
+    for lift in SAFE_LIFTS:
+        via = {"coxa": end.get("coxa", 0.0), "femur": lift,
+               "tibia": start["tibia"]}
+        if not clear(start, via):
+            continue
+        if clear(via, end):
+            return [via, end]
+        # Still unsafe coming down: settle the tibia while high, then
+        # bring the femur down last.
+        via2 = {"coxa": end.get("coxa", 0.0), "femur": lift,
+                "tibia": end["tibia"]}
+        if clear(via, via2) and clear(via2, end):
+            return [via, via2, end]
+    return None
+
+
 def pose_compact(out=140.0, ground_clear=70.0):
     """Leg drawn in and lifted clear: the foot pulled to `out` from the
     femur axis and held `ground_clear` mm above the floor. This is what
@@ -140,7 +231,7 @@ def pose_compact(out=140.0, ground_clear=70.0):
     Do not push this much further at a small `out`: asking for a lot of
     height close in needs femur angles near +90, at the edge of the
     envelope and likely outside the firmware limits."""
-    femur, tibia = leg_ik(out=out, down=BELLY_DROP + COXA_VERTICAL - ground_clear)
+    femur, tibia = leg_ik(out=out, down=GROUND_BELOW_FEMUR - ground_clear)
     return {"coxa": 0.0, "femur": femur, "tibia": tibia}
 
 
@@ -152,8 +243,7 @@ def pose_tuck(ground_clear=10.0):
     The body is resting, so the femur axis sits BELLY_DROP above the
     ground plus COXA_VERTICAL. The foot is placed a little outboard of
     the knee so the first push has somewhere to go."""
-    down = BELLY_DROP + COXA_VERTICAL - ground_clear
-    femur, tibia = leg_ik(out=90.0, down=down)
+    femur, tibia = leg_ik(out=90.0, down=GROUND_BELOW_FEMUR - ground_clear)
     return {"coxa": 0.0, "femur": femur, "tibia": tibia}
 
 
@@ -263,7 +353,7 @@ def _check():
 
     # Named poses must be self-consistent.
     print()
-    ground = BELLY_DROP + COXA_VERTICAL   # below the femur axis, belly-down
+    ground = GROUND_BELOW_FEMUR   # below the femur axis, belly-down
     print(f"  (belly-down, the ground is {ground:.1f} mm below the femur axis)")
     for name, p in (("splay", pose_splay()), ("compact", pose_compact()),
                     ("tuck", pose_tuck())):
@@ -285,6 +375,71 @@ def _check():
                   f"flex {p['tibia']:5.1f}°")
         except Unreachable as e:
             print(f"    height {h:>3} mm -> unreachable ({e})")
+
+    # --- the 2026-10-11 regression: ordering drove a foot through the
+    # floor and snapped a tibia. Assert both the bad order is caught and
+    # the good one is clean.
+    print("\n  Floor-strike guard")
+    splay, compact = pose_splay(), pose_compact()
+    # Moving femur and tibia together from splay is fine -- the danger
+    # was never simultaneity, it was lowering a femur onto a flexed tibia.
+    bad = floor_strikes(splay, compact)
+    if bad:
+        ok = False
+        print(f"    FAIL: splay -> compact should be safe, "
+              f"worst {min(h for _f,_t,h in bad):+.1f} mm")
+    else:
+        print("    splay -> compact together: clear")
+    # The move that actually broke the robot: femur to horizontal while
+    # the tibia is still flexed.
+    flexed = {"coxa": 0.0, "femur": 60.0, "tibia": 100.0}
+    down = {"coxa": 0.0, "femur": 0.0, "tibia": 100.0}
+    hit = floor_strikes(flexed, down)
+    if not hit:
+        ok = False
+        print("    FAIL: lowering a femur onto a flexed tibia should strike")
+    else:
+        print(f"    femur -> horizontal with tibia still flexed: "
+              f"{len(hit)} unsafe, worst {min(h for _f,_t,h in hit):+.1f} mm "
+              f"(correctly refused)")
+
+    lift_only = {"coxa": 0.0, "femur": compact["femur"], "tibia": splay["tibia"]}
+    seq = (("splay->lift", splay, lift_only),
+           ("lift->compact", lift_only, compact),
+           ("compact->tuck", compact, pose_tuck()))
+    for name, a, b in seq:
+        hits = floor_strikes(a, b)
+        if hits:
+            ok = False
+            print(f"    FAIL {name}: {len(hits)} unsafe, "
+                  f"worst {min(h for _f,_t,h in hits):+.1f} mm")
+        else:
+            lowest = min(foot_height(f, t) for f, t in sweep_path(a, b))
+            print(f"    {name:<16} clear, lowest {lowest:+6.1f} mm")
+
+    # The planner must rescue the exact case that broke the robot:
+    # femur horizontal while the tibia is still flexed.
+    print("\n  Safe-path planner")
+    stuck = {"coxa": 0.0, "femur": 60.0, "tibia": 100.0}  # knee up, foot tucked
+    direct = floor_strikes(stuck, pose_splay())
+    route = safe_sequence(stuck, pose_splay())
+    if not direct:
+        ok = False
+        print("    FAIL: flexed-tibia -> splay should be unsafe directly")
+    elif route is None:
+        ok = False
+        print("    FAIL: planner found no route for the collapse case")
+    else:
+        print(f"    flexed tibia -> splay: direct is unsafe "
+              f"({min(h for _f,_t,h in direct):+.1f} mm), planner routes via "
+              + " -> ".join(f"femur {w['femur']:+.0f}°/flex {w['tibia']:.0f}°"
+                            for w in route))
+        prev = stuck
+        for w in route:
+            if floor_strikes(prev, w):
+                ok = False
+                print("    FAIL: planned route still strikes the floor")
+            prev = w
 
     print("\n" + ("Self-check PASSED" if ok else "Self-check FAILED"))
     return 0 if ok else 1

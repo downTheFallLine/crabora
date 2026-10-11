@@ -64,8 +64,8 @@ from gait_lib import (  # noqa: E402
     release, to_counts, to_degrees, write1, write2,
 )
 from pose import (  # noqa: E402
-    Unreachable, pose_compact, pose_splay, pose_stand, pose_tuck,
-    stand_height_range,
+    GROUND_BELOW_FEMUR, Unreachable, floor_strikes, foot_height, pose_compact,
+    pose_splay, pose_stand, pose_tuck, safe_sequence, stand_height_range,
 )
 from survey import ADDR_PRESENT_LOAD, ADDR_SERVO_STATUS, decode_errors, decode_load
 
@@ -221,25 +221,38 @@ def phase_survey(packet, joints, legs):
     return True, bad
 
 
-def phase_collapse(packet, joints, legs, limits, dry):
-    """Femurs horizontal, tibias straight -- body settles belly-down.
+SAFE_LIFT_DEG = 45.0    # femur angle held while tibias straighten
 
-    Coxas are deliberately untouched: rotating an extended leg is what
-    UNTANGLE exists to avoid.
+
+def phase_collapse(packet, joints, legs, limits, dry):
+    """Body to belly, legs unloaded -- in an order that cannot drive a
+    foot into the floor.
+
+    The naive order (femurs to horizontal, then tibias straight) is what
+    snapped a tibia on 2026-10-11: with the floor 62.6 mm below the
+    femur axis, lowering a femur onto a tibia that is still flexed as
+    little as 40 degrees buries the foot. So instead:
+
+      1. raise each femur to AT LEAST SAFE_LIFT_DEG -- only ever
+         raising, which can never drive a foot down
+      2. straighten the tibias while the femurs are up there
+      3. only now lower the femurs to horizontal
+
+    Coxas are still deliberately untouched; rotating an extended leg is
+    what UNTANGLE exists to handle.
     """
     print("\n=== COLLAPSE (body to belly, legs unloaded) ===")
-    counts = pose_counts(pose_splay())
     trouble = {}
-    for digit in (FEMUR_JOINT_DIGIT, TIBIA_JOINT_DIGIT):
-        group = {leg: joints[digit][leg] for leg in legs if leg in joints[digit]}
-        if not group:
-            continue
-        targets = {leg: clamp(counts[digit], limits[(leg, digit)])
-                   for leg in group}
-        print(f"  {JOINT_NAME[digit]}s -> "
-              f"{to_degrees(counts[digit]):+.0f}° ({counts[digit]})")
+
+    femurs = {l: joints[FEMUR_JOINT_DIGIT][l]
+              for l in legs if l in joints[FEMUR_JOINT_DIGIT]}
+    tibias = {l: joints[TIBIA_JOINT_DIGIT][l]
+              for l in legs if l in joints[TIBIA_JOINT_DIGIT]}
+
+    def run(label, group, targets, digit):
+        print(f"  {label}")
         if dry:
-            continue
+            return
         results = move_group(packet, group, targets)
         for leg, (pos, timed_out) in results.items():
             if timed_out or abs(pos - targets[leg]) > POSITION_TOLERANCE:
@@ -247,6 +260,29 @@ def phase_collapse(packet, joints, legs, limits, dry):
                 why = diagnose(packet, sid, port, pos, targets[leg])
                 print(f"    leg {leg} {JOINT_NAME[digit]}: {why}")
                 trouble.setdefault(leg, []).append(f"{JOINT_NAME[digit]} {why}")
+
+    # 1. Raise every femur to at least SAFE_LIFT_DEG. Read where each one
+    #    is first: commanding a flat SAFE_LIFT would LOWER any femur that
+    #    is already higher, which is the dangerous direction.
+    lift_counts = CENTER_POSITION - to_counts(SAFE_LIFT_DEG)
+    targets = {}
+    for leg, (sid, port) in femurs.items():
+        now = (read2(packet, port, sid, ADDR_PRESENT_POSITION, "position")
+               if not dry else CENTER_POSITION)
+        # femur: fewer counts = higher, so "at least this high" is a min()
+        targets[leg] = clamp(min(now, lift_counts), limits[(leg, FEMUR_JOINT_DIGIT)])
+    run(f"1. femurs up to at least +{SAFE_LIFT_DEG:g}° (never lowering one)",
+        femurs, targets, FEMUR_JOINT_DIGIT)
+
+    # 2. Straighten the tibias while the femurs are clear of the floor.
+    run("2. tibias -> straight (femurs still up)", tibias,
+        {l: clamp(CENTER_POSITION, limits[(l, TIBIA_JOINT_DIGIT)])
+         for l in tibias}, TIBIA_JOINT_DIGIT)
+
+    # 3. Only now bring the femurs down.
+    run("3. femurs -> horizontal", femurs,
+        {l: clamp(CENTER_POSITION, limits[(l, FEMUR_JOINT_DIGIT)])
+         for l in femurs}, FEMUR_JOINT_DIGIT)
     return trouble
 
 
