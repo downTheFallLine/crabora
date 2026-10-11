@@ -76,9 +76,19 @@ something gives.
 Swinging a fully extended leg around the hexagon is how things break.
 Compact-then-rotate is the whole trick.
 
-The target is a known **tuck pose**: foot on the ground, out to the
-side, roughly under the hip, body still on its belly. Once all six are
-tucked, standing is a planned motion rather than a recovery.
+**The leg is left LIFTED.** Untangle does not set a foot down. It was
+originally ending in a "tuck" pose with the foot 10 mm off the floor,
+which is no margin at all for an uneven floor or a model error, and the
+legs dug in. The foot now descends only during the stand phase, which
+is slow, interpolated and watched.
+
+**And a leg that cannot lift clear is refused, not dragged.** Before
+rotating any coxa, the code computes what the travel limits will
+ACTUALLY allow and checks the resulting foot height. A femur limited to
++30° leaves the foot about 1 mm below the floor even when the requested
+pose was +60°; rotating then drags the foot across the ground, which is
+exactly how legs dug in and stuck on 2026-10-11. That leg is reported
+with the femur angle it needs, and skipped.
 
 ### 3a. Never plan a joint order by intuition
 

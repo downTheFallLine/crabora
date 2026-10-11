@@ -13,9 +13,11 @@ it is):
             Coxas are NOT touched here -- swinging a 440 mm extended
             leg is exactly what the untangle phase exists to avoid.
   UNTANGLE  one leg at a time: draw it compact and lifted, rotate its
-            coxa to centre, then set it down in tuck. Sequential,
-            because the thing a leg can collide with is its neighbour.
-  STAND     all six together, interpolated in steps from tuck to the
+            coxa to centre, and LEAVE IT LIFTED. Sequential, because
+            the thing a leg can collide with is its neighbour. A leg
+            whose travel limits cannot lift it clear is refused rather
+            than dragged.
+  STAND     all six together, interpolated in steps from lifted to the
             standing pose. The one phase where legs MUST move as one,
             or the body tips.
 
@@ -85,7 +87,7 @@ LIFT_TORQUE_PCT     = 85      # the stand itself needs real force
 BIND_LOAD = 300               # load this high with no motion means bound
 SHAKE_AMPLITUDES = (3.0, 6.0, 12.0)   # degrees, escalating
 SHAKE_CYCLES = 3
-LIFT_STEPS = 6                # interpolation steps from tuck to standing
+LIFT_STEPS = 6                # interpolation steps, lifted -> standing
 MOVE_TIMEOUT = 6.0
 
 JOINTS = ((COXA_JOINT_DIGIT, "coxa"),
@@ -222,6 +224,8 @@ def phase_survey(packet, joints, legs):
 
 
 SAFE_LIFT_DEG = 45.0    # femur angle held while tibias straighten
+FLOOR_MARGIN  = 15.0    # a lifted leg must clear the floor by this much
+                        # before its coxa is allowed to rotate
 
 
 def phase_collapse(packet, joints, legs, limits, dry):
@@ -290,22 +294,43 @@ def phase_untangle(packet, joints, legs, limits, dry, shake_enabled=True,
                    compact_out=140.0, compact_clear=70.0):
     """One leg at a time: compact, rotate coxa to centre, set down."""
     print("\n=== UNTANGLE (one leg at a time) ===")
-    compact = pose_counts(pose_compact(compact_out, compact_clear))
-    tuck = pose_counts(pose_tuck())
+    compact_pose = pose_compact(compact_out, compact_clear)
+    compact = pose_counts(compact_pose)
+    compact_need = compact_pose["femur"]
+    print(f"  (each leg ends lifted at femur {compact_pose['femur']:+.0f}°, "
+          f"flex {compact_pose['tibia']:.0f}° -- "
+          f"{foot_height(compact_pose['femur'], compact_pose['tibia']):.0f} mm "
+          f"of floor clearance; it is NOT set down until the stand phase)")
     failed = []
     for leg in legs:
         print(f"  leg {leg} ({LEG_NAME[leg]}):", end="", flush=True)
         if dry:
-            print(f"  compact femur {to_degrees(compact[FEMUR_JOINT_DIGIT]):+.0f}°"
-                  f" flex {-to_degrees(compact[TIBIA_JOINT_DIGIT]):.0f}°"
-                  f"  -> coxa 0  -> tuck")
+            print(f"  compact femur {compact_pose['femur']:+.0f}°"
+                  f" flex {compact_pose['tibia']:.0f}°  -> coxa 0  (stays lifted)")
             continue
+        # What the travel limits will ACTUALLY allow, not what we asked
+        # for. A femur that clamps short leaves the foot hanging low, and
+        # rotating the coxa then drags it across the floor -- which is
+        # how legs dug in and stuck on 2026-10-11.
+        fem_lim = limits.get((leg, FEMUR_JOINT_DIGIT))
+        tib_lim = limits.get((leg, TIBIA_JOINT_DIGIT))
+        if fem_lim and tib_lim:
+            got_f = -to_degrees(clamp(compact[FEMUR_JOINT_DIGIT], fem_lim))
+            got_t = -to_degrees(clamp(compact[TIBIA_JOINT_DIGIT], tib_lim))
+            clear = foot_height(got_f, got_t)
+            if clear < FLOOR_MARGIN:
+                print(f"  REFUSED: travel limits only reach femur "
+                      f"{got_f:+.0f}°/flex {got_t:.0f}°, leaving the foot "
+                      f"{clear:+.0f} mm vs the floor.")
+                print(f"    Rotating the coxa would drag it. Widen the femur "
+                      f"limit (needs about +{compact_need:.0f}°) and retry.")
+                failed.append(leg)
+                continue
+
         steps = (
             ("compact", {d: compact[d] for d in
                          (FEMUR_JOINT_DIGIT, TIBIA_JOINT_DIGIT)}),
             ("rotate",  {COXA_JOINT_DIGIT: CENTER_POSITION}),
-            ("tuck",    {d: tuck[d] for d in
-                         (FEMUR_JOINT_DIGIT, TIBIA_JOINT_DIGIT)}),
         )
         leg_ok = True
         for name, want in steps:
@@ -349,7 +374,8 @@ def phase_untangle(packet, joints, legs, limits, dry, shake_enabled=True,
     return failed
 
 
-def phase_stand(packet, joints, legs, limits, height, foot_out, dry):
+def phase_stand(packet, joints, legs, limits, height, foot_out, dry,
+                start_pose=None):
     """All six together, interpolated from tuck to the standing pose."""
     print(f"\n=== STAND (to {height:g} mm deck clearance) ===")
     try:
@@ -361,7 +387,10 @@ def phase_stand(packet, joints, legs, limits, height, foot_out, dry):
               f"{lo:.0f}..{hi:.0f} mm")
         return {leg: ["unreachable height"] for leg in legs}
 
-    start, end = pose_tuck(), target_pose
+    # Legs are left LIFTED by untangle, so that is where the lift starts.
+    # Going via tuck would set the feet down at only 10 mm of modelled
+    # clearance -- no margin at all for an uneven floor or model error.
+    start, end = (start_pose or pose_compact()), target_pose
     print(f"  femur {start['femur']:+.1f}° -> {end['femur']:+.1f}°, "
           f"flex {start['tibia']:.1f}° -> {end['tibia']:.1f}°, "
           f"in {LIFT_STEPS} steps")
@@ -588,8 +617,9 @@ def main():
             if not set_torque_limit(packet, all_servos, LIFT_TORQUE_PCT):
                 print("  (torque limit for the lift not confirmed)")
             for leg, why in phase_stand(packet, joints, legs, limits,
-                                        args.height, args.foot_out,
-                                        False).items():
+                                        args.height, args.foot_out, False,
+                                        pose_compact(args.compact_out,
+                                                     args.compact_clear)).items():
                 trouble.setdefault(leg, []).extend(why)
 
         print("\n=== SUMMARY ===")
