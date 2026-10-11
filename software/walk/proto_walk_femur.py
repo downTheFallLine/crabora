@@ -21,14 +21,15 @@ envelope is symmetric but the useful range is not: up is swing clearance
 and tuck, down quickly straightens the leg and loses reach. Default
 --angle here is deliberately well inside the envelope.
 
-THE POINT OF THIS SCRIPT is to settle FEMUR_UP_SIGN. The coxa's mirror
-came from body geometry; the femur has no equivalent, because lift is
-the same physical motion on every leg. So gait_lib predicts ONE sign for
-all six. If that is right, every femur rises together here. If the two
-sides split -- legs 1-3 rising while 4-6 drop, or vice versa -- the
-femurs are mirrored after all and FEMUR_UP_SIGN needs per-side values.
-Watch for that specifically; it is the one outcome this script exists to
-catch.
+FEMUR_UP_SIGN WAS SETTLED BY THIS SCRIPT on 2026-10-11: the femurs are
+NOT mirrored (all six moved together, as predicted -- lift is the same
+physical motion on every leg, unlike the coxa whose mirror comes from
+body geometry), and a rising servo count LOWERS the joint, so up is -1.
+The first run had that direction backwards.
+
+If a future run shows the two sides splitting -- legs 1-3 rising while
+4-6 drop -- then a servo has been remounted and the table needs per-side
+values after all.
 
 Gravity is not symmetric either: down is assisted, up works against the
 leg's weight. Expect the two directions to settle differently, and a

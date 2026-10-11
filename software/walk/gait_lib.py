@@ -60,18 +60,17 @@ LEG_NAME = {
 # rather than patching individual legs here.
 FORWARD_SIGN = {1: +1, 2: +1, 3: +1, 4: -1, 5: -1, 6: -1}
 
-# +1 = a rising servo count lifts this femur UP.
+# Sign such that `CENTER + UP_SIGN * counts` raises the femur. A RISING
+# servo count LOWERS this joint, so up is -1.
 #
-# Unlike the coxa, this is NOT expected to be mirrored: the coxa's mirror
-# comes from body geometry (legs 1 and 6 point different ways, so forward
-# is opposite rotations), whereas lift is the same physical motion on
-# every leg. So if all femur servos are mounted the same way round
-# relative to their own leg, one sign serves all six.
-#
-# ⚠ PREDICTED, NOT MEASURED. Confirm on two legs -- one per side -- before
-# any gait code leans on it. If the sides disagree, the femurs ARE
-# mirrored and this needs per-side signs like FORWARD_SIGN above.
-FEMUR_UP_SIGN = {leg: +1 for leg in ALL_LEGS}
+# ✓ VERIFIED ON HARDWARE 2026-10-11. Two findings from that run:
+#   1. The femurs are NOT mirrored. All six moved together, confirming the
+#      prediction: the coxa's mirror comes from body geometry (legs 1 and 6
+#      point different ways, so forward is opposite rotations), whereas
+#      lift is the same physical motion on every leg. One sign serves all.
+#   2. The direction was inverted from the first guess -- the run raised
+#      the femurs when the code said "down". Hence -1, not +1.
+FEMUR_UP_SIGN = {leg: -1 for leg in ALL_LEGS}
 
 # Femur centre (2048) is the femur HORIZONTAL; envelope is ±90°, straight
 # up to straight down. See README.md -- the envelope is symmetric but the

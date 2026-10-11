@@ -148,21 +148,24 @@ available or equally cheap. Down is also gravity-assisted while up works
 against the leg's weight, so the two directions differ in torque and in
 how a move settles.
 
-### Femur sign — a prediction, not yet verified
+### Femur sign — verified
 
 The coxa mirror comes from **body geometry**: legs 1 and 6 point
 different ways, so "forward" is opposite rotations. The femur has no
 equivalent — *lift is the same physical motion on every leg.*
 
-So if the femur servos are all mounted the same way round relative to
-their own leg, the femur sign should be **uniform across all six legs,
-not mirrored like the coxa.** `FEMUR_UP_SIGN` in `gait_lib.py` encodes
-that as +1 everywhere.
+So the femur sign should be **uniform across all six legs, not mirrored
+like the coxa.**
 
-⚠ This is reasoning, not measurement. Confirm it on two legs — one from
-each side — before any gait code depends on it. If the two sides turn
-out to disagree, the femurs are mirrored after all and the table needs
-per-side signs like the coxa's.
+**Confirmed on hardware 2026-10-11.** All six femurs moved together, so
+the reasoning holds and one sign serves every leg. The run also showed
+the direction was backwards from the first guess: **a rising servo count
+LOWERS the femur**, so `FEMUR_UP_SIGN` in `gait_lib.py` is −1 everywhere,
+not +1.
+
+If a later run shows the two sides splitting — legs 1–3 rising while 4–6
+drop — a servo has been remounted and the table would need per-side
+values after all.
 
 ### Travel limits
 
@@ -185,8 +188,8 @@ assembled robot rather than guessing:
 - **Joint zero poses** — what physical pose each joint's 2048 centre
   corresponds to. Settled for the femur (horizontal, above); the tibia
   is still open. Set with `software/utils/set_center.py`.
-- **Joint angle signs** — the coxa's is settled and verified (above);
-  the femur's is predicted but unverified (above); the tibia's is open.
+- **Joint angle signs** — the coxa's and the femur's are both settled
+  and verified on hardware (above); the tibia's is open.
 - **Link lengths** — coxa offset, femur and tibia, from the current
   `leg/*/linkage_leg` designs. The old figures (58 / 100 / 120 mm)
   predate the current leg revision and should be re-read from the
