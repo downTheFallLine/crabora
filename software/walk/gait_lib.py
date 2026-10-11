@@ -75,8 +75,10 @@ FEMUR_UP_SIGN = {leg: -1 for leg in ALL_LEGS}
 # +1 = a rising servo count EXTENDS this tibia (straightens the knee,
 # pushing the foot away from the body). -1 means a rising count flexes it.
 #
-# ⚠ UNVERIFIED -- the first guess, same as the femur's was. Two things to
-# expect, based on what the other joints turned out to be:
+# ⚠ TBD -- ASSUMED, NOT VERIFIED. Tom's decision 2026-10-11: proceed on
+# this assumption and come back to it. Anything that depends on tibia
+# DIRECTION is provisional until proto_walk_tibia.py --legs 1 4 is run.
+# Two things to expect, based on what the other joints turned out to be:
 #   - It should be UNIFORM across all six, not mirrored. Flexing a knee is
 #     the same physical motion on every leg, exactly as lifting is for the
 #     femur (which was confirmed uniform 2026-10-11). The coxa's mirror
@@ -132,6 +134,11 @@ COXA_VERTICAL = 17.6         # up, above the pan disc bottom
 
 FEMUR_LEN = 100.0            # femur axis -> tibia axis
 TIBIA_LEN = 120.0            # tibia axis -> foot tip
+
+# Hexagon deck, flat-to-flat / 2 (unibody/design_flanged_deck.py
+# DECK_APOTHEM). A foot closer to the body centre than this is somewhere
+# under the deck, which is the geometric test for "folded underneath".
+DECK_APOTHEM = 181.825
 
 
 # =============================================================
