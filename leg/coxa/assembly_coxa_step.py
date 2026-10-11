@@ -79,7 +79,9 @@ WOOD_LENGTH = 240.0
 WOOD_WIDTH  =  89.0
 WOOD_THICK  =  38.0
 
-OUT_DIR  = "linkage_leg"
+# Resolved from this script's own location, so output lands beside the
+# design file no matter which directory it is run from.
+OUT_DIR  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "linkage_leg")
 PNG_PATH = OUT_DIR + "/assembly_coxa_step.png"
 
 

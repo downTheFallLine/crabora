@@ -76,7 +76,9 @@ CAP_SCREW_OFFSET_X    = 26.6   # ±X from cap centre, matches cap SCREW_OFFSET_X
 CAP_SCREW_OFFSET_Y    = 14.0   # ±Y from cap centre, matches cap SCREW_OFFSET_Y
 PADDLE_MOUNT_CLEAR    = 3.4    # M3 clearance
 
-OUT_DIR  = "linkage_leg"
+# Resolved from this script's own location, so output lands beside the
+# design file no matter which directory it is run from.
+OUT_DIR  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "linkage_leg")
 STL_PATH = OUT_DIR + "/coxa_pan.stl"
 PNG_PATH = OUT_DIR + "/coxa_pan.png"
 

@@ -119,7 +119,9 @@ N_TRUSS               = 0      # alternating triangles in the beam (0 = solid)
 TRUSS_MARGIN          = 2.0    # min wall between cell edge and next cell
 TRUSS_CHORD_MARGIN    = 2.5    # min wall between cell apex/base and beam edge
 
-OUT_DIR  = "linkage_leg"
+# Resolved from this script's own location, so output lands beside the
+# design file no matter which directory it is run from.
+OUT_DIR  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "linkage_leg")
 STL_PATH = OUT_DIR + "/femur_link.stl"
 PNG_PATH = OUT_DIR + "/femur_link.png"
 

@@ -91,7 +91,9 @@ TRUSS_X_HI            = 108.0  # X where the truss region ends
 # Outline tessellation: number of points along the back-of-disc arc.
 N_ARC                 = 96
 
-OUT_DIR  = "linkage_leg"
+# Resolved from this script's own location, so output lands beside the
+# design file no matter which directory it is run from.
+OUT_DIR  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "linkage_leg")
 STL_PATH = OUT_DIR + "/tibia_link.stl"
 PNG_PATH = OUT_DIR + "/tibia_link.png"
 

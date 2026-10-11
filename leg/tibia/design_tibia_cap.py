@@ -121,7 +121,9 @@ SCREW_OFFSET_Y           = 16.35   # ±Y from cap centre -- FIXED (matches the f
                                    # pocket, so pocket trims can't move the bolts.
                                    # Leaves ~2.0 mm wall inboard / 1.8 mm outboard.
 
-OUT_DIR  = "linkage_leg"
+# Resolved from this script's own location, so output lands beside the
+# design file no matter which directory it is run from.
+OUT_DIR  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "linkage_leg")
 STL_PATH = OUT_DIR + "/tibia_cap.stl"
 PNG_PATH = OUT_DIR + "/tibia_cap.png"
 

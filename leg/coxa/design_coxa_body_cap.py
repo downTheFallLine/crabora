@@ -129,7 +129,9 @@ SCREW_OFFSET_Y           = (POCKET_Y + WALL_THK_Y) / 2.0   # 15.35, centred in t
                                                             # (between pocket edge
                                                             # and cap outer face)
 
-OUT_DIR  = "linkage_leg"
+# Resolved from this script's own location, so output lands beside the
+# design file no matter which directory it is run from.
+OUT_DIR  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "linkage_leg")
 STL_PATH = OUT_DIR + "/coxa_body_cap.stl"
 PNG_PATH = OUT_DIR + "/coxa_body_cap.png"
 

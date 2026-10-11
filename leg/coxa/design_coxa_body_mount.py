@@ -96,7 +96,9 @@ WOOD_SCREW_OFFSET_X = CRADLE_W / 2.0 + FLANGE_OVERHANG_X / 2.0   # ≈ 32.6
 WOOD_SCREW_OFFSET_Y = CRADLE_H / 2.0 + FLANGE_OVERHANG_Y / 2.0   # ≈ 21.85
 
 # Output
-OUT_DIR  = "linkage_leg"
+# Resolved from this script's own location, so output lands beside the
+# design file no matter which directory it is run from.
+OUT_DIR  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "linkage_leg")
 STL_PATH = OUT_DIR + "/coxa_body_mount.stl"
 PNG_PATH = OUT_DIR + "/coxa_body_mount.png"
 
