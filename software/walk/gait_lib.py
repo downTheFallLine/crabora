@@ -21,9 +21,27 @@ import time
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from scservo_sdk import COMM_SUCCESS, PacketHandler, PortHandler  # noqa: F401
+# The bus libraries are optional on purpose: the geometry constants and
+# sign tables below are pure data, useful for kinematics and analysis on
+# a machine with no servo SDK installed. Anything that actually touches
+# the bus raises a clear error instead of failing at import time.
+try:
+    from scservo_sdk import COMM_SUCCESS, PacketHandler, PortHandler  # noqa: F401
+    from urt_lib import DEFAULT_BAUDRATE, find_urt_devices  # noqa: F401,E402
+    HAVE_BUS = True
+except ImportError as _exc:                                  # pragma: no cover
+    HAVE_BUS = False
+    _BUS_IMPORT_ERROR = _exc
+    COMM_SUCCESS = 0
+    DEFAULT_BAUDRATE = 1_000_000
 
-from urt_lib import DEFAULT_BAUDRATE, find_urt_devices  # noqa: F401,E402
+    def _no_bus(*_a, **_k):
+        raise ImportError(
+            f"servo bus libraries are not available ({_BUS_IMPORT_ERROR}). "
+            f"Install them with:  python3 -m pip install -r "
+            f"software/requirements.txt")
+
+    PacketHandler = PortHandler = find_urt_devices = _no_bus
 
 
 # =============================================================
