@@ -1,0 +1,41 @@
+# CRABORA -- CAD / part-generation dependencies
+#
+# For the design_*.py, assembly_*.py and generate_*.py scripts that build
+# the printed parts under leg/, spacer/, sled/ and unibody/.
+#
+# The robot's runtime (software/) has its own, much smaller, list in
+# software/requirements.txt -- pyserial and the Feetech SDK. Nothing here
+# is needed on the Pi; this is desktop-only.
+#
+#   python3 -m pip install -r requirements-cad.txt
+#
+# Verified working on macOS with python3.10 and the versions pinned as
+# comments below (2026-10-11). Later versions are likely fine; the lower
+# bounds are what matters.
+
+# --- geometry kernel ---------------------------------------------------
+trimesh>=4.0            # 5.1.0 -- meshes, primitives, booleans, STL export
+numpy>=1.24             # 2.2.5
+
+# Boolean backend. trimesh does NOT pull this in, and without it every
+# script dies at the first difference()/union() with:
+#     ImportError: No boolean backend: `pip install manifold3d`
+# This is the dependency most likely to be missing on a fresh machine.
+manifold3d>=2.3         # 3.5.4
+
+# Also not pulled in by trimesh, and also only fails at call time:
+#   scipy    -> mesh.fix_normals() / body_count (connected components)
+#   networkx -> graph operations used by design_femur_link.py
+scipy>=1.10             # 1.15.3
+networkx>=3.0           # 3.4.2
+
+# 2D geometry -- design_tibia_link.py builds its outline from polygons.
+shapely>=2.0            # 2.1.2
+
+# unibody/generate_parts.py writes STLs through numpy-stl rather than
+# trimesh (`from stl import mesh`).
+numpy-stl>=3.0          # 4.0.0
+
+# --- previews ----------------------------------------------------------
+# Every design script renders a multi-panel PNG next to its STL.
+matplotlib>=3.7         # 3.10.9
