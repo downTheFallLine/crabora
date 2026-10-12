@@ -70,9 +70,29 @@ and which way is positive — are in [walk/README.md](walk/README.md).
 Read that before setting anything; the centres have been redone twice
 already because the convention changed underneath them.
 
-Diagnostics: `utils/read_servo_voltage.py <id>` (voltage, temperature,
-error flags), `utils/sweep_servo.py`, `utils/swing_arm.py <leg>`,
-`utils/swing_legs.py <legs...>`.
+### Talking to one servo
+
+`utils/servo.py` is the general-purpose tool. Registers are addressed by
+NAME, so the next one-off need does not require a new script:
+
+```bash
+python3 utils/servo.py scan                    # what IDs are alive, where
+python3 utils/servo.py info 33                 # the registers worth seeing
+python3 utils/servo.py get 33 present_load
+python3 utils/servo.py set 33 torque_limit 500
+python3 utils/servo.py id 1 33                 # change an ID, safely
+python3 utils/servo.py reset --all             # clear latched faults
+python3 utils/servo.py regs                    # the register map
+```
+
+EEPROM registers are unlocked and re-locked around the write. Registers
+that can make a servo unreachable (`id`, `baud`, `mode`, `lock`) need
+`--force`. `id` refuses unless exactly one servo is on the bus, because
+two servos sharing an ID are indistinguishable afterwards.
+
+Movement: `utils/sweep_servo.py`, `utils/swing_arm.py <leg>`,
+`utils/swing_legs.py <legs...>`. Health at a glance:
+`utils/read_servo_voltage.py <id>`.
 
 ---
 
@@ -138,8 +158,17 @@ machine with no servo SDK installed.
 
 ## Legacy
 
-`../software.old/` holds the pre-2026-09 bench scripts. Superseded —
-`set_middle.py` and `set_limits.py` became `utils/set_center.py`,
-`limp.py` became `utils/go_limp.py` — but `crabora_bus.py` and the
-per-servo tools (`set_id.py`, `scan_ids.py`, `reset_overload.py`) have
-no replacement yet and are still worth raiding.
+`../software.old/` holds the pre-2026-09 bench scripts. The ones with
+successors were **deleted** on 2026-10-12 — they are in git history if
+ever needed, and leaving two versions around is how you end up editing
+the wrong one:
+
+| deleted | use instead |
+|---|---|
+| `set_middle.py`, `set_limits.py`, `center_servo.py` | `utils/set_center.py` |
+| `limp.py` | `utils/go_limp.py`, `utils/all_limp.py` |
+| `scan_ids.py`, `set_id.py`, `reset_overload.py`, `servo_report.py`, `examine_servo.py` | `utils/servo.py` |
+
+What remains there is genuinely legacy: `crabora_bus.py` (the old
+driver, superseded by `walk/gait_lib.py`), old gait experiments, and
+one-off diagnostics. Nothing in `software/` imports any of it.
