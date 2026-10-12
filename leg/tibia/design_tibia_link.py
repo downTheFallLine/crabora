@@ -119,15 +119,18 @@ SPINE_SIDE      = +1.0    # +Z face; the horn mounts on the other side
 MARK_ENABLED    = True
 MARK_NAME       = "DACTYL"
 MARK_BLOCK      = "BLOCK 4"
-MARK_NAME_SIZE  = 9.0     # cap height, mm
-MARK_BLOCK_SIZE = 5.0
-MARK_DEPTH      = 0.6     # how far the letters stand proud
-MARK_EMBED      = 0.2     # how far they sink INTO the face. Letters that
-                          # merely touch the surface share coincident
-                          # faces with it, which booleans resolve badly
-                          # and leave the mesh non-watertight.
-MARK_X          = 34.0    # start of the lettering, past the disc
-MARK_SIDE       = -1.0    # -Z face, opposite the spine
+MARK_NAME_SIZE  = 5.5     # font size, mm (cap height is ~0.72 of this)
+MARK_BLOCK_SIZE = 4.0
+MARK_DEPTH      = 0.6     # ENGRAVED this deep into the face
+MARK_OVERLAP    = 0.2     # cutter stands this far proud before cutting,
+                          # so the boolean has no coincident faces to
+                          # resolve -- those leave the mesh non-watertight
+MARK_X          = 22.0    # start of the lettering, just past the disc
+MARK_SIDE       = +1.0    # +Z face -- the SAME side as the spine
+MARK_Y_GAP      = 0.7     # clear gap between the rib and the first row;
+                          # the text sits in the band beside the rib,
+                          # which runs ~11.6 mm at the knee down to
+                          # ~6.8 mm by X=70, so it has to stay compact
 
 # v3 (2026-10-11): truss disabled. The open triangles removed material
 # from the middle of the link, which is exactly where bending stress
@@ -289,69 +292,50 @@ def _text_polygons(text, size):
 
 
 def _lettering(outline):
-    """Raised DACTYL / BLOCK n on the flat face. Returns solids to union.
+    """ENGRAVED DACTYL / BLOCK n beside the rib. Returns cutter solids.
 
-    Placement is fiddly in two ways, both of which bit on the first try:
-      - the letters must SIT ON the face, not float above it, or the
-        mesh is not watertight and the slicer drops them;
-      - text drawn in XY reads correctly from +Z, so for the -Z face it
-        has to be mirrored in X or it comes out backwards.
+    The text goes on the same face as the spine, in the flat band to one
+    side of it. That band is narrow and tapers -- about 11.6 mm wide at
+    the knee, 6.8 mm by X=70 -- so the rows are stacked outward from the
+    rib and kept small.
+
+    Each cutter stands MARK_OVERLAP proud of the face before cutting
+    down MARK_DEPTH. Starting exactly level would share a face with the
+    body, which booleans resolve badly.
     """
-    from trimesh import transformations as tf
     parts = []
-    rows = ((MARK_NAME, MARK_NAME_SIZE, 0.0),
-            (MARK_BLOCK, MARK_BLOCK_SIZE, -(MARK_NAME_SIZE * 0.6 + 2.0)))
-    first_span = None          # centre later rows under the first
-    for text, size, y_off in rows:
+    y = SPINE_WIDTH / 2.0 + MARK_Y_GAP      # outward edge of the rib
+    # Rows stack OUTWARD from the rib, so the block goes down first and
+    # the name ends up on top, which is the way round you want to read it.
+    rows = ((MARK_BLOCK, MARK_BLOCK_SIZE), (MARK_NAME, MARK_NAME_SIZE))
+    for text, size in rows:
         glyphs = _text_polygons(text, size)
         if glyphs is None or glyphs.is_empty:
             continue
         pieces = (list(glyphs.geoms)
                   if glyphs.geom_type == "MultiPolygon" else [glyphs])
-        solids = [creation.extrude_polygon(g, MARK_DEPTH + MARK_EMBED)
+        solids = [creation.extrude_polygon(g, MARK_DEPTH + MARK_OVERLAP)
                   for g in pieces]
-        # Union rather than concatenate: where two glyph outlines touch,
-        # simply stacking the meshes leaves a non-manifold edge with four
-        # faces on it. A boolean resolves the contact properly.
         solid = (solids[0] if len(solids) == 1
                  else trimesh.boolean.union(solids))
 
-        if MARK_SIDE < 0:
-            # mirror in X so it reads the right way round from -Z, and
-            # flip the extrusion so it grows away from the plate
-            solid.apply_transform(tf.reflection_matrix([0, 0, 0], [1, 0, 0]))
-            solid.apply_transform(tf.reflection_matrix([0, 0, 0], [0, 0, 1]))
-
-        # Now place it: start at MARK_X, centred on its row, and resting
-        # exactly on the face so the union is solid.
         b = solid.bounds
-        if first_span is None:
-            x_start = MARK_X
-        else:
-            # centre this row under the name rather than left-aligning
-            x_start = (first_span[0] + first_span[1]) / 2.0 \
-                      - (b[1][0] - b[0][0]) / 2.0
         solid.apply_translation([
-            x_start - b[0][0],
-            y_off - (b[0][1] + b[1][1]) / 2.0,
-            (MARK_SIDE * LINK_THK / 2.0)
-            - (b[1][2] if MARK_SIDE < 0 else b[0][2])
-            + MARK_SIDE * -MARK_EMBED,
+            MARK_X - b[0][0],
+            y - b[0][1],
+            MARK_SIDE * LINK_THK / 2.0 - MARK_DEPTH,
         ])
+        y += (b[1][1] - b[0][1]) + MARK_Y_GAP
 
-        if first_span is None:
-            first_span = (solid.bounds[0][0], solid.bounds[1][0])
-
-        # Refuse to emboss outside the part -- raised text hanging off
-        # the edge is a print failure, not a cosmetic flaw.
-        b = solid.bounds
-        box = shapely.geometry.box(b[0][0], b[0][1], b[1][0], b[1][1])
+        # Engraving that runs off the edge is a hole, not a marking.
+        bb = solid.bounds
+        box = shapely.geometry.box(bb[0][0], bb[0][1], bb[1][0], bb[1][1])
         if not outline.contains(box):
             raise ValueError(
-                f"lettering {text!r} at size {size} does not fit inside the "
-                f"link outline (needs X {b[0][0]:.1f}..{b[1][0]:.1f}, "
-                f"Y {b[0][1]:.1f}..{b[1][1]:.1f}) -- reduce MARK_*_SIZE "
-                f"or move MARK_X")
+                f"lettering {text!r} at size {size} does not fit beside the "
+                f"rib (needs X {bb[0][0]:.1f}..{bb[1][0]:.1f}, "
+                f"Y {bb[0][1]:.1f}..{bb[1][1]:.1f}) -- reduce MARK_*_SIZE "
+                f"or move MARK_X inboard where the part is wider")
         parts.append(solid)
     return parts
 
@@ -403,13 +387,11 @@ def build_link():
                                  SPINE_SIDE * LINK_THK / 2.0])
         body = trimesh.boolean.union([body, spine])
 
-    # ---------------------------------------------------------------
-    # POSITIVE: raised lettering on the face opposite the spine.
-    # ---------------------------------------------------------------
-    if MARK_ENABLED:
-        body = trimesh.boolean.union([body] + _lettering(outline))
-
     cutters = []
+
+    # Engraved lettering, cut into the face beside the spine.
+    if MARK_ENABLED:
+        cutters.extend(_lettering(outline))
 
     # Central relief for the horn screw head
     cutters.append(z_cylinder(
@@ -503,9 +485,8 @@ def render_png(link, path):
         ("3/4 view  (spine up)",     25, -55),
         ("top down  (spine face)",   88, -90),
         ("side view",                 0, -90),
-        # The lettering is on the -Z face, so none of the above would
-        # ever show it.
-        ("underside  (lettering)",  -88, -90),
+
+        ("spine face  (lettering)",  88, -90),
     ]
     fig = plt.figure(figsize=(15, 10), facecolor=bg)
     for k, (title, elev, azim) in enumerate(panels):
@@ -559,8 +540,8 @@ def main():
               f"(full {SPINE_X_FULL:.0f}..{SPINE_X_TAPER:.0f})  "
               f"-> ~3.9x lateral strength at the knee")
     if MARK_ENABLED:
-        print(f"  marking   : \"{MARK_NAME}\" / \"{MARK_BLOCK}\" raised "
-              f"{MARK_DEPTH:.1f} mm on the "
+        print(f"  marking   : \"{MARK_NAME}\" / \"{MARK_BLOCK}\" ENGRAVED "
+              f"{MARK_DEPTH:.1f} mm into the "
               f"{'+' if MARK_SIDE > 0 else '-'}Z face from X={MARK_X:.0f}")
     print(f"  foot      : ROUNDED tip, Φ{FOOT_WIDTH:.0f} mm  "
           f"(glue rubber pad post-print for grip)")
