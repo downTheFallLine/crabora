@@ -242,7 +242,7 @@ def foot_positions(arbiter):
         try:
             c = angles[(leg, COXA_JOINT_DIGIT)]
             f = -angles[(leg, FEMUR_JOINT_DIGIT)]   # up is -count
-            t = -angles[(leg, TIBIA_JOINT_DIGIT)]   # flex is -count (assumed)
+            t = -angles[(leg, TIBIA_JOINT_DIGIT)]   # flex is -count (verified)
         except KeyError:
             incomplete.append(leg)
             continue
@@ -267,8 +267,6 @@ def foot_positions(arbiter):
         "feet": feet,
         "incomplete_legs": incomplete,
         "neighbours_close": close,
-        "note": ("tibia sign is assumed, not measured, so foot heights "
-                 "inherit that assumption"),
     }
 
 

@@ -215,19 +215,21 @@ sweep would clamp against the extend limit on every leg, every rep.
 
 ### Tibia sign
 
-`TIBIA_EXTEND_SIGN` is +1 everywhere as a first guess, and is the last
-unverified joint sign. Two expectations from the other two joints:
+`TIBIA_EXTEND_SIGN` is **+1 everywhere, verified on hardware 2026-10-12**
+(`tests/test_05_calibration.py --signs --legs 1 4`). Both predictions
+from the other two joints held except one:
 
-- It should be **uniform across all six**, not mirrored. Flexing a knee
-  is the same physical motion on every leg, exactly as lifting is for
-  the femur (confirmed uniform 2026-10-11). The coxa's mirror comes from
-  body geometry and has no analogue at the knee.
-- It may well be **−1**. The femur's was, and if the tibia servos follow
-  the same mounting convention this one will too.
+- **Uniform across all six, not mirrored** — as expected. Legs 1 and 4
+  are one per side and both extended, so the sides did not split. Flexing
+  a knee is the same physical motion on every leg, exactly as lifting is
+  for the femur. The coxa's mirror comes from body geometry and has no
+  analogue at the knee.
+- **+1, not −1** — the femur needed inverting from its first guess and
+  this one did not, so the tibia servos do *not* follow the femur's
+  mounting convention.
 
-The outcome to watch for is the two sides *splitting* — legs 1–3
-extending while 4–6 flex. That would mean the tibias are mirrored after
-all. All six moving together in the wrong direction is just a sign flip.
+This was the last unverified joint sign. All three tables in
+`gait_lib.py` now match hardware.
 
 ## Link geometry
 
@@ -275,8 +277,8 @@ assembled robot rather than guessing:
 - ~~Joint zero poses~~ — all three are now settled: coxa neutral, femur
   horizontal, tibia collinear with the femur. Set them with
   `software/utils/set_center.py`.
-- **Joint angle signs** — the coxa's and the femur's are settled and
-  verified on hardware; the tibia's is predicted but unverified (above).
+- ~~Joint angle signs~~ — all three are settled and verified on
+  hardware: coxa 2026-10-10, femur 2026-10-11, tibia 2026-10-12.
 - ~~Travel limits~~ — set on hardware as of 2026-10-11. Every joint's
   safe swing is now written into servo firmware, so a bad command is
   clamped by the servo itself rather than by the calling code.

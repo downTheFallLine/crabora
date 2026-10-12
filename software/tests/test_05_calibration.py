@@ -10,8 +10,8 @@ This exists because the same class of fault kept costing time. Leg 6
 carried different travel limits from every other leg for several
 sessions before anyone noticed. Centres were set to one convention,
 the convention changed, and they had to be redone. The tibia direction
-sign was assumed rather than measured, and it gates every phase of the
-stand recovery.
+sign went unmeasured for two days while every phase of the stand
+recovery depended on it.
 
 None of that is visible from a single joint. It only shows up when you
 put the six legs side by side, which is what this does.
@@ -32,7 +32,8 @@ Three passes, increasingly invasive:
   --signs  DIRECTION. Moves one leg per side and asks you which way it
            actually went, then checks that against the sign tables in
            walk/gait_lib.py. This is the only way to settle a sign
-           without an IMU, and it is how to close out the tibia TBD.
+           without an IMU. All three were closed out this way; re-run it
+           after any re-centring or servo swap.
 
 Exit code is non-zero if anything disagrees, so it can gate a session.
 
@@ -286,7 +287,7 @@ SIGN_QUESTIONS = {
 
 def directions(packet, joints, legs, limits):
     """Move a joint and ask which way it went. The only way to check a
-    sign without an IMU -- and how to close out the tibia TBD."""
+    sign without an IMU."""
     problems = []
     counts = to_counts(PROBE_DEGREES * 1.5)
     print(f"\n=== DIRECTION (you confirm what you see) ===")

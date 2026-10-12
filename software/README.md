@@ -144,9 +144,6 @@ machine with no servo SDK installed.
 
 ## Known open items
 
-- **The tibia sign is assumed, not measured.** It is flagged in four
-  files and gates every phase of the stand recovery. Two minutes to
-  settle: `python3 tests/test_05_calibration.py --signs --legs 1 4`
 - **Power is unmeasured.** The LM2596 passes 2–3 A on paper and is not
   regulating (1 V differential against a 2 V dropout spec), but the
   robot stands and turns on it anyway. An inline watt-meter would

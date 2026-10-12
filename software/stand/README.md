@@ -162,26 +162,20 @@ reflects that something was left behind.
 | Link lengths | ✓ confirmed with calipers 2026-10-11 |
 | Coxa sign | ✓ verified on hardware |
 | Femur sign | ✓ verified on hardware |
-| **Tibia sign** | ⚠ **TBD — ASSUMED** |
+| Tibia sign | ✓ verified on hardware 2026-10-12 |
 
-### ⚠ The tibia sign is assumed, not verified
+### All three joint signs are verified
 
-`TIBIA_EXTEND_SIGN` in `walk/gait_lib.py` is `+1` as a first guess and
-has never been run on hardware. Tom's call on 2026-10-11 was to proceed
-on the assumption and come back to it.
+`TIBIA_EXTEND_SIGN` in `walk/gait_lib.py` is `+1`, confirmed on hardware
+2026-10-12 with `tests/test_05_calibration.py --signs --legs 1 4`. Legs
+1 and 4 are one per side, so that run also settled the mirror question:
+both extended, so the tibia is uniform across all six, like the femur.
 
-**What that means for this code:** anything depending on tibia
-*direction* is provisional. That specifically includes step 1 of the
-untangle sequence — "flex the tibia" is the very first move made on a
-tangled leg, and if the sign is backwards it will **extend into**
-whatever the leg is caught on instead of pulling clear.
-
-Until it is verified, run recovery with the tibia excluded, or with the
-body on the test stand where a wrong move is harmless. Settle it with:
-
-```
-python3 ../walk/proto_walk_tibia.py --legs 1 4 --flex 20
-```
+This removes the last caveat on the untangle sequence. Step 1 — "flex
+the tibia" on a tangled leg — now pulls the foot clear rather than
+possibly extending it into whatever the leg is caught on, so recovery no
+longer needs the tibia excluded or the body on the test stand for
+safety's sake.
 
 ## Layout
 

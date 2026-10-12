@@ -66,10 +66,9 @@ short, concrete, numbers where they matter. Lead with the answer. If
 something looks wrong, say what it is and what would fix it. Do not pad
 with caveats, and do not list everything you checked unless it helps.
 
-Two things worth flagging when they come up, because they are known and
-unresolved: the tibia direction sign is assumed rather than measured,
-and the servo power converter is not regulating (it has about 1 V of
-headroom against a 2 V dropout requirement)."""
+One thing worth flagging when it comes up, because it is known and
+unresolved: the servo power converter is not regulating (it has about
+1 V of headroom against a 2 V dropout requirement)."""
 
 
 def _schema_for(name):

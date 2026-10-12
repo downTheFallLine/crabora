@@ -25,10 +25,9 @@ A joint latched in overload has already dropped its own torque and will
 ignore commands until cleared, so those are called out separately: they
 are the first thing to fix before attempting a recovery.
 
-⚠ The tibia sign is ASSUMED, not verified (see README.md), so the foot
-positions below inherit that assumption. If the tibia sign turns out
-backwards, computed foot heights are wrong in the vertical axis. Joint
-readings themselves are unaffected -- those are measured, not derived.
+All three joint signs are verified on hardware (the tibia's as of
+2026-10-12), so the computed foot positions below rest on measured
+directions rather than assumed ones.
 
 Usage:
   python3 survey.py
@@ -99,7 +98,6 @@ def foot_position(leg, coxa_deg, femur_deg, tibia_deg):
       femur_deg -- up from horizontal, positive is up
       tibia_deg -- knee flexion from straight, positive folds the foot down
 
-    ⚠ The tibia term inherits the ASSUMED tibia sign. See README.md.
     """
     # Leg's nominal bearing, clockwise from the front point; the body frame
     # is right-handed, hence the negated Y.
@@ -224,7 +222,7 @@ def main():
             try:
                 c = angles[(leg, COXA_JOINT_DIGIT)]
                 f = -angles[(leg, FEMUR_JOINT_DIGIT)]   # up is -count
-                t = -angles[(leg, TIBIA_JOINT_DIGIT)]   # flex is -count (ASSUMED)
+                t = -angles[(leg, TIBIA_JOINT_DIGIT)]   # flex is -count (verified)
             except KeyError:
                 print(f"  {f'{leg} {LEG_NAME[leg]}':<12} "
                       f"{'(incomplete leg -- cannot compute)':>36}")

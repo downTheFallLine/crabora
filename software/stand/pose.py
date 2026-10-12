@@ -18,7 +18,6 @@ Angle conventions, matching walk/gait_lib's sign tables:
               foot DOWN relative to the femur's direction
     coxa   -- degrees about the body's vertical axis, CCW positive
 
-⚠ The tibia convention inherits the ASSUMED tibia sign. See README.md.
 
 Everything here is pure geometry -- no bus, no servos, no side effects,
 so it can be exercised without hardware. Run this file directly for a

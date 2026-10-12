@@ -93,17 +93,14 @@ FEMUR_UP_SIGN = {leg: -1 for leg in ALL_LEGS}
 # +1 = a rising servo count EXTENDS this tibia (straightens the knee,
 # pushing the foot away from the body). -1 means a rising count flexes it.
 #
-# ⚠ TBD -- ASSUMED, NOT VERIFIED. Tom's decision 2026-10-11: proceed on
-# this assumption and come back to it. Anything that depends on tibia
-# DIRECTION is provisional until proto_walk_tibia.py --legs 1 4 is run.
-# Two things to expect, based on what the other joints turned out to be:
-#   - It should be UNIFORM across all six, not mirrored. Flexing a knee is
-#     the same physical motion on every leg, exactly as lifting is for the
-#     femur (which was confirmed uniform 2026-10-11). The coxa's mirror
-#     comes from body geometry and has no analogue here.
-#   - The sign may well be -1. The femur's was, and if the tibia servos are
-#     mounted to the same convention, this one will follow.
-# Settle it with proto_walk_tibia.py before any gait code leans on it.
+# ✓ VERIFIED ON HARDWARE 2026-10-12 (test_05_calibration.py --signs
+# --legs 1 4). Legs 1 and 4 are one per side, so this settles the mirror
+# question too: both extended, so the tibia is NOT mirrored -- uniform
+# across all six, like the femur. The first guess of +1 was right; unlike
+# the femur, this one did not need inverting.
+#
+# This was the last unverified joint sign. All three tables now match
+# hardware.
 TIBIA_EXTEND_SIGN = {leg: +1 for leg in ALL_LEGS}
 
 # Femur centre (2048) is the femur HORIZONTAL; envelope is ±90°, straight

@@ -33,11 +33,6 @@ FAILURE POLICY: continue with five legs and report. A leg that cannot
 be freed is dropped from the remaining phases and named in the summary;
 the exit code reflects that something was left behind.
 
-⚠ THE TIBIA SIGN IS ASSUMED, NOT VERIFIED (see README.md). Every phase
-here commands tibias. If the sign is backwards, UNTANGLE's first move
-extends the knee into whatever the leg is caught on instead of pulling
-it clear. Run on the test stand until that is settled.
-
 Usage:
   python3 stand.py --dry-run
   python3 stand.py --phase survey
@@ -112,7 +107,7 @@ def pose_counts(pose):
     Sign conventions come from gait_lib's verified tables:
       coxa   +count = CCW                     -> count = centre + deg
       femur  +count LOWERS (FEMUR_UP_SIGN -1) -> count = centre - deg
-      tibia  +count EXTENDS (ASSUMED +1)      -> count = centre - flex
+      tibia  +count EXTENDS (TIBIA_EXTEND_SIGN +1) -> count = centre - flex
     """
     return {
         COXA_JOINT_DIGIT:  CENTER_POSITION + to_counts(pose["coxa"]),
@@ -491,7 +486,6 @@ def main():
     print("CRABORA stand -- recover and stand up")
     print(f"  target {args.height:g} mm deck clearance, foot "
           f"{args.foot_out:g} mm out, {args.speed} steps/s")
-    print("  ⚠ tibia sign is ASSUMED, not verified -- test stand only\n")
 
     if args.dry_run:
         for name, p in (("splay", pose_splay()),
