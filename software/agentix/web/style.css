@@ -1,0 +1,220 @@
+:root {
+  --bg:        #0c0d11;
+  --panel:     #14161d;
+  --panel-2:   #1b1e27;
+  --line:      #262a35;
+  --text:      #e6ebf2;
+  --muted:     #8b93a5;
+  --accent:    #5b8cff;
+  --good:      #3ecf8e;
+  --warn:      #e3b341;
+  --bad:       #ff5f56;
+  --radius:    10px;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--text);
+  font: 15px/1.55 ui-sans-serif, -apple-system, "Segoe UI", Roboto,
+        "Helvetica Neue", sans-serif;
+}
+
+body { display: flex; flex-direction: column; }
+
+/* ---------------- control strip ---------------- */
+.strip {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-wrap: wrap;
+  padding: 10px 16px;
+  background: var(--panel);
+  border-bottom: 1px solid var(--line);
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-weight: 650;
+  letter-spacing: .14em;
+  font-size: 13px;
+}
+
+.mark {
+  width: 11px; height: 11px;
+  border-radius: 3px;
+  background: var(--accent);
+  box-shadow: 0 0 10px rgba(91,140,255,.75);
+}
+
+.phase {
+  font-size: 10px;
+  letter-spacing: .1em;
+  text-transform: uppercase;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 2px 8px;
+  margin-left: 2px;
+}
+
+.lights { display: flex; gap: 6px; margin-left: auto; }
+
+.light {
+  font-size: 10.5px;
+  letter-spacing: .07em;
+  text-transform: uppercase;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  padding: 3px 10px 3px 20px;
+  position: relative;
+  white-space: nowrap;
+}
+
+.light::before {
+  content: "";
+  position: absolute;
+  left: 8px; top: 50%;
+  width: 6px; height: 6px;
+  margin-top: -3px;
+  border-radius: 50%;
+  background: var(--muted);
+}
+
+.light.good::before { background: var(--good); box-shadow: 0 0 7px var(--good); }
+.light.warn::before { background: var(--warn); box-shadow: 0 0 7px var(--warn); }
+.light.bad::before  { background: var(--bad);  box-shadow: 0 0 7px var(--bad); }
+.light.bad { color: var(--bad); border-color: rgba(255,95,86,.35); }
+
+.actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+.btn {
+  font: inherit;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 7px 13px;
+  cursor: pointer;
+  transition: background .12s, border-color .12s;
+}
+.btn:hover   { background: #232733; border-color: #343a49; }
+.btn:disabled{ opacity: .45; cursor: default; }
+
+/* STOP is deliberately the loudest thing on the page. */
+.btn.stop {
+  background: var(--bad);
+  border-color: var(--bad);
+  color: #1b0604;
+  font-weight: 750;
+  letter-spacing: .08em;
+  padding: 7px 18px;
+}
+.btn.stop:hover { background: #ff7b73; border-color: #ff7b73; }
+.btn.stop:active { transform: translateY(1px); }
+
+/* ---------------- conversation ---------------- */
+main {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  width: 100%;
+  max-width: 860px;
+  margin: 0 auto;
+  padding: 0 16px;
+}
+
+.log {
+  flex: 1;
+  overflow-y: auto;
+  padding: 22px 0 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.msg { display: flex; flex-direction: column; gap: 5px; }
+.msg .who {
+  font-size: 10.5px;
+  letter-spacing: .11em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+.msg .body {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  padding: 11px 14px;
+}
+.msg.me .body { background: var(--panel-2); border-color: #2d3342; }
+.msg.me { align-items: flex-end; }
+.msg.me .body { max-width: 80%; }
+.msg .body p:first-child { margin-top: 0; }
+.msg .body p:last-child  { margin-bottom: 0; }
+.msg.bad .body { border-color: rgba(255,95,86,.4); }
+
+.tools {
+  font-size: 11.5px;
+  color: var(--muted);
+  margin-top: 7px;
+  padding-top: 7px;
+  border-top: 1px dashed var(--line);
+}
+
+pre {
+  margin: 0;
+  font: 12.5px/1.5 ui-monospace, SFMono-Regular, Menlo, monospace;
+  white-space: pre-wrap;
+  word-break: break-word;
+  color: #cfd7e3;
+}
+
+.thinking .body { color: var(--muted); font-style: italic; }
+
+/* ---------------- composer ---------------- */
+.composer {
+  display: flex;
+  gap: 9px;
+  padding: 12px 0 18px;
+  border-top: 1px solid var(--line);
+}
+
+.composer input {
+  flex: 1;
+  font: inherit;
+  color: var(--text);
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  padding: 11px 13px;
+  outline: none;
+}
+.composer input:focus { border-color: var(--accent); }
+
+.composer button {
+  font: inherit;
+  font-weight: 600;
+  color: #08101f;
+  background: var(--accent);
+  border: 0;
+  border-radius: 9px;
+  padding: 11px 20px;
+  cursor: pointer;
+}
+.composer button:disabled { opacity: .45; cursor: default; }
+
+@media (max-width: 620px) {
+  .lights { order: 3; margin-left: 0; width: 100%; }
+  .actions { order: 2; }
+}

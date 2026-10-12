@@ -1,0 +1,59 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CRABORA</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- The control strip is NOT part of the chat. STOP has to work when
+     the model is slow, confused or unreachable, so it posts straight to
+     /api/stop and never goes near the agent. -->
+<header class="strip">
+  <div class="brand">
+    <span class="mark" aria-hidden="true"></span>
+    <span>CRABORA</span>
+    <span class="phase">read-only</span>
+  </div>
+
+  <div class="lights" id="lights">
+    <span class="light" id="light-bus"   title="servo bus">bus</span>
+    <span class="light" id="light-servos" title="servos answering">servos</span>
+    <span class="light" id="light-faults" title="latched faults">faults</span>
+    <span class="light" id="light-agent" title="language model">agent</span>
+  </div>
+
+  <div class="actions">
+    <button class="btn" data-tool="robot_status">Status</button>
+    <button class="btn" data-tool="calibration_check">Calibration</button>
+    <button class="btn" data-tool="foot_positions">Feet</button>
+    <button class="btn" data-tool="imu_state">IMU</button>
+    <button class="btn stop" id="stop">STOP</button>
+  </div>
+</header>
+
+<main>
+  <div class="log" id="log" aria-live="polite">
+    <div class="msg bot">
+      <div class="who">crabora</div>
+      <div class="body">
+        <p>Read-only for now — I can look at the robot but not move it.</p>
+        <p>Ask me things like <em>“is anything faulted?”</em>,
+           <em>“what’s leg 6’s travel?”</em> or
+           <em>“are the legs calibrated the same?”</em></p>
+      </div>
+    </div>
+  </div>
+
+  <form class="composer" id="composer" autocomplete="off">
+    <input id="prompt" type="text" placeholder="Ask about the robot…"
+           aria-label="Message">
+    <button type="submit" id="send">Send</button>
+  </form>
+</main>
+
+<script src="app.js"></script>
+</body>
+</html>

@@ -4,3 +4,6 @@ feetech-servo-sdk
 # IMU (MPU-6050) over I2C -- tests/test_06_imu.py.
 # Pi only; nothing else in software/ needs it.
 smbus2>=0.4
+
+# agentix web API (agentix/app.py). Pi only.
+flask>=3.0
