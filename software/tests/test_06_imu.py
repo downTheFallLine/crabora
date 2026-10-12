@@ -10,9 +10,13 @@ A sensor that answers on the bus but is rotated 90 degrees on the deck
 will pass every naive test and then quietly corrupt every heading the
 robot ever computes. So this test does not stop at "the chip responds".
 It uses gravity as a known reference: the robot is sitting still on a
-level floor, so the accelerometer must read ~1 g straight down the body
-frame's -Z and ~0 on X and Y. Anything else means the mount is rotated,
-and it says which way.
+level floor, so the accelerometer must read ~1 g on the body frame's
++Z and ~0 on X and Y. Anything else means the mount is rotated, and it
+says which way.
+
+(An accelerometer at rest measures the REACTION force holding it up,
+not gravity itself, so the axis pointing UP reads +1 g. Expecting -1 g
+is a classic sign error and inverts every tilt reading.)
 
 Body frame, from walk/README.md:
     +X forward, out through the point between legs 1 and 6
@@ -73,9 +77,8 @@ TEMP_SCALE  = 340.0
 TEMP_OFFSET = 36.53
 
 # --- what "mounted correctly" means ----------------------------------
-# Sitting still and level, the only force is gravity, so the
-# accelerometer reads 1 g along the body frame's -Z and nothing on the
-# other two axes.
+# Sitting still and level, the sensor measures the reaction force
+# holding it up: +1 g on the body frame's +Z, nothing on X and Y.
 GRAVITY_TOL   = 0.15         # g, how far off 1.0 the down axis may read
 LEVEL_TOL     = 0.15         # g, how much X/Y may read before it is tilted
 GYRO_DRIFT_TOL = 2.0         # deg/s of bias while stationary
@@ -136,21 +139,21 @@ def describe_mount(ax, ay, az):
     sign = "-" if g[biggest] < 0 else "+"
     others = [i for i in range(3) if i != biggest]
 
-    if biggest == 2 and g[2] < 0 and all(abs(g[i]) <= LEVEL_TOL for i in others):
-        return True, "gravity on -Z, X and Y flat: mount agrees with the body frame"
+    if biggest == 2 and g[2] > 0 and all(abs(g[i]) <= LEVEL_TOL for i in others):
+        return True, "+1 g on +Z, X and Y flat: mount agrees with the body frame"
 
-    if biggest == 2 and g[2] > 0:
-        return False, ("gravity on +Z -- the sensor is UPSIDE DOWN. Flip it, "
+    if biggest == 2 and g[2] < 0:
+        return False, ("-1 g on Z -- the sensor is UPSIDE DOWN. Flip it, "
                        "or negate Y and Z in software")
 
     if biggest != 2:
-        return False, (f"gravity is on {sign}{AXES[biggest]}, not -Z -- the "
+        return False, (f"gravity is on {sign}{AXES[biggest]}, not +Z -- the "
                        f"sensor is mounted on its {'side' if biggest else 'end'}. "
                        f"Rotate it so its Z points UP, or record the rotation "
                        f"as a constant")
 
     tilt = math.degrees(math.atan2(math.hypot(ax, ay), abs(az)))
-    return False, (f"gravity is on -Z but X={ax:+.2f} Y={ay:+.2f} -- the robot "
+    return False, (f"gravity is on +Z but X={ax:+.2f} Y={ay:+.2f} -- the robot "
                    f"is tilted about {tilt:.0f}°, or the floor is not level")
 
 
