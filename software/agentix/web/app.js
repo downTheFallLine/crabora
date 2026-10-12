@@ -336,16 +336,25 @@ function micState(state, label) {
   $("mic-label").textContent = label;
 }
 
-if (!SR) {
-  $("mic").disabled = true;
-  micState("", "No mic");
-  $("mic").title = "This browser has no speech recognition (Chrome does)";
-} else if (!window.isSecureContext) {
+// Check the CONTEXT before the constructor. Browsers differ in how they
+// refuse an insecure page: Chrome exposes webkitSpeechRecognition and
+// fails at start(), Safari does not define it at all. Testing for the
+// constructor first therefore reports "no such feature" on a browser
+// that has the feature and is only objecting to http -- the wrong
+// diagnosis, pointing at the wrong fix.
+if (!window.isSecureContext) {
   $("mic").disabled = true;
   micState("", "Mic blocked");
   $("mic").title =
-    "The microphone needs https or localhost. Reach this page over an " +
-    "SSH tunnel (http://localhost:5050) and the button works.";
+    "The microphone needs https or localhost -- this page is plain http. " +
+    "Reach it through an SSH tunnel: " +
+    "ssh -N -L 5050:localhost:5000 ubuntu@<pi>, then http://localhost:5050/";
+} else if (!SR) {
+  $("mic").disabled = true;
+  micState("", "No mic");
+  $("mic").title =
+    "This browser has no speech recognition. Chrome and Safari both do; " +
+    "Firefox does not.";
 }
 
 function startListening() {
@@ -354,6 +363,9 @@ function startListening() {
   recog.interimResults = true;
   recog.continuous = false;          // stops on its own at a pause
   recog.maxAlternatives = 1;
+  // Safari requires start() to happen inside the user gesture that asked
+  // for it, and will not honour continuous. Both are satisfied here: this
+  // runs synchronously from the click handler.
 
   const input = $("prompt");
   let finalText = "";

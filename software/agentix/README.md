@@ -220,5 +220,11 @@ Receiver owns 5000 on macOS. This also sidesteps the macOS Local Network
 privacy permission, which Chrome needs to reach a LAN address at all.
 
 Reading replies aloud has no such requirement and works either way.
-Recognition is Chrome-only (`webkitSpeechRecognition`); other browsers
-get a disabled button saying so, and everything else keeps working.
+
+Recognition works in Chrome and Safari; Firefox has none. Note that
+browsers refuse an insecure page differently -- Chrome exposes
+`webkitSpeechRecognition` and fails at `start()`, Safari does not define
+it at all -- so the context is checked *before* the constructor. Testing
+the other way round reports "no such feature" on a browser that has the
+feature and is only objecting to http, which sends you looking for the
+wrong fix.
