@@ -7,3 +7,4 @@ smbus2>=0.4
 
 # agentix web API (agentix/app.py). Pi only.
 flask>=3.0
+langchain-anthropic>=1.7

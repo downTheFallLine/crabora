@@ -64,9 +64,40 @@ so rather than failing.
 | `POST /api/chat` | natural language in, answer out |
 | `POST /api/stop` | **emergency stop** |
 
+## The agent
+
+`agent.py` is LangChain + `ChatAnthropic`, the same shape as NORA.
+
+| | |
+|---|---|
+| model | `claude-opus-5-5` |
+| thinking | adaptive — it cannot be disabled on this model, and `budget_tokens` is rejected |
+| effort | `low` — these are small lookups over small tool results, and the UI should feel quick. Raise it in `agent.py` if answers get thin |
+| tool choice | `auto` — Opus 5.5 rejects forced `any`/`tool` |
+
+A **manual tool loop** rather than LangGraph: five tools and one
+decision, LangGraph is another dependency on a Pi, and executing the
+tools here is where the safety boundary lives. Every call goes through
+the arbiter, and nothing the model emits reaches a servo except through
+a function listed in `tools.py`.
+
+Set `ANTHROPIC_API_KEY` before starting the server. Without it
+`build_agent()` raises, `app.py` catches it, and the UI reports chat as
+unavailable while the control strip and every tool keep working.
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+python3 agentix/app.py
+```
+
+Tool failures are handed back to the model as observations rather than
+raised — it can usually recover, and "leg 3 isn't answering" is a better
+answer than a 500.
+
 ## Still to do
 
-- `agent.py` — LangChain wiring. `app.py` imports it if present and
-  degrades cleanly if not.
 - nginx config for serving `web/` and proxying `/api`.
 - Motion tools, in blast-radius order, with constrained schemas.
+- The live model path is **untested** — there were no Anthropic
+  credentials on the machine it was written on. Tool wiring, schemas and
+  the degraded path are verified; the first real request is not.
