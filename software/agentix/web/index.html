@@ -15,7 +15,7 @@
   <div class="brand">
     <span class="mark" aria-hidden="true"></span>
     <span>CRABORA</span>
-    <span class="phase">read-only</span>
+    <span class="phase" id="phase">read-only</span>
   </div>
 
   <div class="lights" id="lights">
@@ -30,6 +30,13 @@
     <button class="btn" data-tool="calibration_check">Calibration</button>
     <button class="btn" data-tool="foot_positions">Feet</button>
     <button class="btn" data-tool="imu_state">IMU</button>
+
+    <!-- Motion. Disabled until a human arms it; the server enforces the
+         same rule, so this is a courtesy, not the gate. -->
+    <span class="sep" aria-hidden="true"></span>
+    <button class="btn arm" id="arm" title="Allow motion for a few minutes">ARM</button>
+    <button class="btn move" data-motion="stand_up" disabled>Stand Up</button>
+    <button class="btn move" data-motion="lay_down" disabled>Lay Down</button>
     <button class="btn stop" id="stop">STOP</button>
   </div>
 </header>
@@ -39,10 +46,12 @@
     <div class="msg bot">
       <div class="who">crabora</div>
       <div class="body">
-        <p>Read-only for now — I can look at the robot but not move it.</p>
+        <p>I can look at the robot, and move it once you press
+           <strong>ARM</strong>. Arming lasts a few minutes and I can’t
+           do it myself.</p>
         <p>Ask me things like <em>“is anything faulted?”</em>,
-           <em>“what’s leg 6’s travel?”</em> or
-           <em>“are the legs calibrated the same?”</em></p>
+           <em>“nudge leg 3’s femur up 10 degrees”</em> or
+           <em>“lay down, then stand back up at 90mm”</em></p>
       </div>
     </div>
   </div>

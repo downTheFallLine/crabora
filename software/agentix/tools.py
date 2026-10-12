@@ -1,20 +1,17 @@
 """
 tools -- what the agent is allowed to do.
 
-PHASE 1: READ ONLY. Nothing here moves a servo. Not because motion is
-hard to wire up, but because the plumbing -- nginx, Flask, tool
-dispatch, the UI -- should be shaken out against a robot that cannot be
-damaged by it. Two tibias have already snapped from motions that were
-geometrically wrong, and a model choosing parameters is a new source of
-wrong parameters.
+THE READ-ONLY TOOLS. Nothing here moves a servo -- motion lives in
+motion.py, behind the arming gate in safety.py.
 
-When motion is added, it goes in order of blast radius (dance and turn
-before stand) and NOT as thin passthroughs to the CLI. Arguments get
-constrained schemas -- `turn(degrees: 90|180|270|360)` -- so the safe
-range lives where the model cannot argue with it.
+That split is the point. These can be called freely, by the agent or by
+the control strip, with no gate and no consequence beyond bus time. They
+are also what the agent should reach for first: looking is free, moving
+is not.
 
-The emergency stop is deliberately NOT a tool. It belongs to the human,
-on a button, reachable without the model being involved at all.
+The emergency stop is deliberately NOT a tool, in either module. It
+belongs to the human, on a button, reachable without the model being
+involved at all.
 
 Every function returns a plain dict: JSON for the API, and readable
 when a model gets it back as an observation.

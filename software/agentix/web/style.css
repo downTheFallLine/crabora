@@ -218,3 +218,33 @@ pre {
   .lights { order: 3; margin-left: 0; width: 100%; }
   .actions { order: 2; }
 }
+
+/* ---------------- motion ---------------- */
+.sep {
+  width: 1px;
+  align-self: stretch;
+  background: var(--line);
+  margin: 0 2px;
+}
+
+/* ARM is a mode, so it reads as one: off it is just another button, on
+   it is unmistakable. The STOP button stays the loudest thing regardless. */
+.btn.arm {
+  border-color: #3a4152;
+  font-weight: 650;
+  letter-spacing: .06em;
+  min-width: 96px;
+}
+.btn.arm.on {
+  background: var(--warn);
+  border-color: var(--warn);
+  color: #1d1400;
+}
+.btn.arm.on:hover { background: #f0c552; border-color: #f0c552; }
+
+.btn.move { min-width: 88px; }
+.btn.move:disabled {
+  opacity: .35;
+  /* Not a hint that it is broken -- it is waiting for ARM. */
+  cursor: not-allowed;
+}

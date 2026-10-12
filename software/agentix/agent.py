@@ -32,6 +32,7 @@ from langchain_core.messages import (                         # noqa: E402
 from langchain_core.tools import StructuredTool               # noqa: E402
 from pydantic import BaseModel, Field                         # noqa: E402
 
+from motion import MOTION_HELP, MOTION_TOOLS, NUDGE_MAX_DEG   # noqa: E402
 from tools import READ_ONLY_TOOLS, TOOL_HELP                  # noqa: E402
 
 # Opus 5.5. Thinking is adaptive (it cannot be disabled on this model);
@@ -50,9 +51,22 @@ WORKSPACE_ID = os.environ.get("ANTHROPIC_WORKSPACE_ID")
 
 SYSTEM = """You are the voice of CRABORA, a six-legged walking robot.
 
-You can LOOK at the robot but not move it. If asked to move, turn, dance
-or stand, say plainly that motion is not wired up yet and suggest the
-command-line programs instead -- do not pretend to have done it.
+You can look at the robot AND move it, but only while a human has armed
+motion on the control strip. If a motion tool comes back saying it is not
+armed, say so plainly and ask them to press ARM -- you cannot arm it
+yourself, and should not pretend otherwise or keep retrying.
+
+Moving the robot is real and it breaks: two tibias have already snapped.
+So:
+- Look before you move. robot_status or calibration_check first if you do
+  not know what state it is in.
+- Prefer the smallest motion that answers the question. nudge_joint
+  before lay_down, lay_down before stand_up.
+- stand_up and turn draw the most current and carry the most risk. Say
+  what you are about to do before doing it when the move is a big one.
+- If a motion reports joints that came up short, say which, and do not
+  simply try again harder.
+- Never chain several motions to "fix" an unexpected result. Report it.
 
 Conventions you should use when answering:
 - Legs are numbered 1-6 clockwise from above. The front of the robot is
@@ -77,17 +91,59 @@ unresolved: the servo power converter is not regulating (it has about
 1 V of headroom against a 2 V dropout requirement)."""
 
 
-def _schema_for(name):
-    """Argument schema per tool. Only joint_detail takes any."""
-    if name != "joint_detail":
-        class NoArgs(BaseModel):
-            pass
-        return NoArgs
+# Schemas are where the safe range lives. Stating the bounds here means
+# the model usually asks for something legal; motion.py enforces them
+# anyway, because "usually" is not a safety property.
+class NoArgs(BaseModel):
+    pass
 
-    class JointArgs(BaseModel):
-        leg: int = Field(description="leg number, 1-6")
-        joint: str = Field(description="'coxa', 'femur' or 'tibia'")
-    return JointArgs
+
+class JointArgs(BaseModel):
+    leg: int = Field(description="leg number, 1-6")
+    joint: str = Field(description="'coxa', 'femur' or 'tibia'")
+
+
+class LegsArgs(BaseModel):
+    legs: list[int] | None = Field(
+        default=None, description="legs 1-6; omit for all six")
+
+
+class NudgeArgs(BaseModel):
+    leg: int = Field(description="leg number, 1-6")
+    joint: str = Field(description="'coxa', 'femur' or 'tibia'")
+    degrees: float = Field(
+        description=f"how far to move from the present position, "
+                    f"-{NUDGE_MAX_DEG:g} to +{NUDGE_MAX_DEG:g}. Positive is "
+                    f"forward (coxa), up (femur), extend (tibia).")
+
+
+class StandArgs(BaseModel):
+    height: float = Field(
+        default=80.0, description="deck clearance in mm, 40-160")
+
+
+class TurnArgs(BaseModel):
+    degrees: int = Field(
+        description="clockwise turn: exactly 90, 180, 270 or 360")
+
+
+class DanceArgs(BaseModel):
+    seconds: float = Field(default=10.0, description="2-30 seconds")
+
+
+_SCHEMAS = {
+    "joint_detail": JointArgs,
+    "relax":        LegsArgs,
+    "lay_down":     LegsArgs,
+    "nudge_joint":  NudgeArgs,
+    "stand_up":     StandArgs,
+    "turn":         TurnArgs,
+    "dance":        DanceArgs,
+}
+
+
+def _schema_for(name):
+    return _SCHEMAS.get(name, NoArgs)
 
 
 def _bind(fn, arbiter):
@@ -97,10 +153,18 @@ def _bind(fn, arbiter):
     return call
 
 
+def _bind2(fn, arbiter, safety):
+    """Same, for motion tools, which also need the arming gate."""
+    def call(**kwargs):
+        return fn(arbiter, safety, **kwargs)
+    return call
+
+
 class Agent:
-    def __init__(self, arbiter, model=MODEL, effort=EFFORT):
+    def __init__(self, arbiter, safety=None, model=MODEL, effort=EFFORT):
         self.model_name = model
         self._arbiter = arbiter
+        self._safety = safety
         self._tools = [
             StructuredTool.from_function(
                 func=_bind(fn, arbiter),
@@ -110,6 +174,19 @@ class Agent:
             )
             for name, fn in sorted(READ_ONLY_TOOLS.items())
         ]
+        if safety is not None:
+            # Motion tools take (arbiter, safety, **kwargs). The safety
+            # gate is closed over, not exposed: there is no argument the
+            # model can pass to affect whether it is armed.
+            self._tools += [
+                StructuredTool.from_function(
+                    func=_bind2(fn, arbiter, safety),
+                    name=name,
+                    description=MOTION_HELP.get(name, name),
+                    args_schema=_schema_for(name),
+                )
+                for name, fn in sorted(MOTION_TOOLS.items())
+            ]
         kwargs = {}
         if WORKSPACE_ID:
             kwargs["default_headers"] = {
@@ -186,10 +263,10 @@ def _text(message: AIMessage) -> str:
     return "\n".join(p for p in parts if p).strip()
 
 
-def build_agent(arbiter):
+def build_agent(arbiter, safety=None):
     """Raises if no credentials, so app.py can degrade cleanly."""
     if not (os.environ.get("ANTHROPIC_API_KEY")
             or os.environ.get("ANTHROPIC_AUTH_TOKEN")):
         raise RuntimeError(
             "no ANTHROPIC_API_KEY set -- chat is disabled, tools still work")
-    return Agent(arbiter)
+    return Agent(arbiter, safety)

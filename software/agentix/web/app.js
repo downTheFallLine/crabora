@@ -66,6 +66,7 @@ async function refreshLights() {
              h.bus.available ? "bus" : "no bus");
     setLight("light-agent", h.agent && h.agent.enabled ? "good" : "warn",
              h.agent && h.agent.enabled ? "agent" : "no agent");
+    setArmed(h.safety);
     if (!h.bus.available) {
       setLight("light-servos", "", "servos");
       setLight("light-faults", "", "faults");
@@ -88,6 +89,66 @@ async function refreshLights() {
     setLight("light-servos", "warn", "servos");
   }
 }
+
+/* ---------------- arming ---------------- */
+/* The server decides whether motion is allowed; this just reflects it and
+ * keeps the buttons honest. Never assume armed state locally -- a window
+ * can expire between polls, and a disabled button is a courtesy, not a
+ * guarantee. */
+let armedUntil = 0;
+
+function setArmed(safety) {
+  const armed = !!(safety && safety.armed);
+  armedUntil = armed ? Date.now() + safety.seconds_left * 1000 : 0;
+  $("arm").textContent = armed ? `ARMED ${safety.seconds_left}s` : "ARM";
+  $("arm").classList.toggle("on", armed);
+  $("phase").textContent = armed ? "motion armed" : "read-only";
+  document.querySelectorAll("[data-motion]").forEach((b) => {
+    b.disabled = !armed;
+  });
+}
+
+function tickArm() {
+  if (!armedUntil) return;
+  const left = Math.max(0, Math.round((armedUntil - Date.now()) / 1000));
+  $("arm").textContent = left ? `ARMED ${left}s` : "ARM";
+  if (!left) { armedUntil = 0; refreshLights(); }
+}
+setInterval(tickArm, 1000);
+
+$("arm").addEventListener("click", async () => {
+  const armed = armedUntil > Date.now();
+  try {
+    const r = await api(armed ? "/api/disarm" : "/api/arm", {});
+    setArmed(r.safety);
+    sayText("crabora", "bot", armed
+      ? "Disarmed. Nothing will move until you arm again."
+      : `Armed for ${r.safety.seconds_left}s. Motion is allowed until it expires.`);
+  } catch (e) {
+    sayText("crabora", "bot bad", e.message);
+  }
+});
+
+/* ---------------- motion buttons ---------------- */
+document.querySelectorAll("[data-motion]").forEach((btn) => {
+  btn.addEventListener("click", async () => {
+    const name = btn.dataset.motion;
+    const label = btn.textContent;
+    document.querySelectorAll("[data-motion]").forEach((b) => (b.disabled = true));
+    btn.textContent = "…";
+    sayText("you", "me", label);
+    try {
+      const r = await api(`/api/motion/${name}`, {});
+      sayData("crabora", r.result);
+      if (r.safety) setArmed(r.safety);
+    } catch (e) {
+      sayText("crabora", "bot bad", e.message);
+    } finally {
+      btn.textContent = label;
+      refreshLights();
+    }
+  });
+});
 
 /* ---------------- control strip ---------------- */
 document.querySelectorAll("[data-tool]").forEach((btn) => {

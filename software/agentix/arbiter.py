@@ -14,12 +14,19 @@ and nothing bypasses it. It exists for three reasons:
      is a chat UI nobody uses.
 
   3. STOP ALWAYS WINS. `emergency_stop()` takes the lock with priority
-     and drops torque on everything. It is the one write this module
-     offers, and it is deliberately not something the agent can call --
-     it belongs to the human, on a button.
+     and drops torque on everything. It is deliberately not something
+     the agent can call -- it belongs to the human, on a button.
 
-Nothing here decides anything. Policy -- what an agent may do, with what
-arguments -- lives in tools.py, above this.
+Nothing here decides anything. Policy -- whether motion is permitted
+(safety.py), what an agent may ask for and with what arguments
+(tools.py) -- lives above this. The writes below are mechanism: they
+will move whatever they are told to move, which is exactly why nothing
+calls them without passing through the layers that say no.
+
+The one thing they do enforce is the servo's own travel limits, read
+from firmware and applied to every goal. That is not policy, it is the
+last line of a defence that starts three layers up, and it costs one
+clamp.
 """
 
 import os
@@ -32,9 +39,11 @@ sys.path.insert(0, os.path.join(os.path.dirname(_HERE), "walk"))
 
 from gait_lib import (  # noqa: E402
     ALL_LEGS, COXA_JOINT_DIGIT, FEMUR_JOINT_DIGIT, JOINT_NAME,
-    TIBIA_JOINT_DIGIT, ADDR_TORQUE_ENABLE,
+    TIBIA_JOINT_DIGIT, ADDR_TORQUE_ENABLE, ADDR_GOAL_POSITION,
+    ADDR_GOAL_SPEED, ADDR_MAX_ANGLE, ADDR_MIN_ANGLE,
+    ADDR_PRESENT_POSITION, POSITION_TOLERANCE,
     BusError, PacketHandler,
-    find_joints, find_urt_devices, open_ports, read1, write1,
+    find_joints, find_urt_devices, open_ports, read1, read2, write1, write2,
 )
 
 JOINT_DIGITS = (COXA_JOINT_DIGIT, FEMUR_JOINT_DIGIT, TIBIA_JOINT_DIGIT)
@@ -53,6 +62,10 @@ class Busy(ArbiterError):
     """Something else is already using the bus."""
 
 
+class Cancelled(ArbiterError):
+    """A motion was interrupted by a stop request."""
+
+
 class Arbiter:
     def __init__(self, ports=None, busy_timeout=8.0):
         self._lock = threading.RLock()
@@ -63,6 +76,12 @@ class Arbiter:
         self._discovered_at = 0.0
         self._busy_timeout = busy_timeout
         self._last_action = None
+        # Set without the lock, on purpose. A long motion holds the bus,
+        # so STOP cannot wait for it -- it raises this flag first and the
+        # motion loop drops out at its next step, then STOP takes the bus
+        # and releases torque. Checking a flag between steps is what makes
+        # a 30-second dance interruptible at all.
+        self._cancel = threading.Event()
         self.available = False
         self.reason = "not started"
 
@@ -143,6 +162,24 @@ class Arbiter:
         leg, joint = sid // 10, sid % 10
         return self.joints().get(joint, {}).get(leg)
 
+    # --- cancellation -------------------------------------------------
+    def request_stop(self):
+        """Ask any running motion to stop. Takes no lock, so it works
+        while the bus is held."""
+        self._cancel.set()
+
+    def clear_stop(self):
+        self._cancel.clear()
+
+    @property
+    def stopping(self):
+        return self._cancel.is_set()
+
+    def check_cancel(self):
+        """Call between motion steps. Raises if a stop was requested."""
+        if self._cancel.is_set():
+            raise Cancelled("stopped by the operator")
+
     # --- the one write this module offers ----------------------------
     def emergency_stop(self):
         """Drop torque on everything. Belongs to the human, not the agent.
@@ -151,6 +188,7 @@ class Arbiter:
         Verifies rather than assumes: a servo that ignored the write is
         exactly what the operator needs told.
         """
+        self.request_stop()      # first: unblocks a motion holding the bus
         if not self.available:
             raise ArbiterError(f"bus unavailable: {self.reason}")
         released, failed, missing = [], [], []
@@ -173,6 +211,7 @@ class Arbiter:
                             failed.append(sid)
                     except BusError:
                         failed.append(sid)
+        self.clear_stop()        # the flag has done its job
         return {"released": sorted(released), "failed": sorted(failed),
                 "missing": sorted(missing)}
 
@@ -209,11 +248,100 @@ class _Session:
         return read1(self._a._packet, loc[1], sid, addr, what)
 
     def read2(self, sid, addr, what="read"):
+        return read2(self._a._packet, self._port(sid), sid, addr, what)
+
+    def _port(self, sid):
         loc = self._a.locate(sid)
         if loc is None:
             raise ArbiterError(f"servo {sid} is not on the bus")
-        from gait_lib import read2 as _read2
-        return _read2(self._a._packet, loc[1], sid, addr, what)
+        return loc[1]
+
+    # --- writes ------------------------------------------------------
+    # Mechanism, not permission. Whether any of this may happen at all is
+    # decided in safety.py and tools.py, before anything gets here.
+
+    def write1(self, sid, addr, value, what="write"):
+        return write1(self._a._packet, self._port(sid), sid, addr, value, what)
+
+    def write2(self, sid, addr, value, what="write"):
+        return write2(self._a._packet, self._port(sid), sid, addr, value, what)
+
+    def limits(self, sid):
+        """(min, max) travel in counts, straight from servo firmware.
+
+        These were set on hardware per joint, so they are the robot's own
+        account of where it may go -- better than anything this process
+        can assert, and they outlive any bug up here.
+        """
+        return (self.read2(sid, ADDR_MIN_ANGLE, "min angle"),
+                self.read2(sid, ADDR_MAX_ANGLE, "max angle"))
+
+    def torque(self, sids, on, speed=None):
+        """Enable or drop torque. With speed, sets it before enabling."""
+        done = []
+        for sid in sids:
+            if on and speed is not None:
+                self.write2(sid, ADDR_GOAL_SPEED, int(speed), "speed")
+            self.write1(sid, ADDR_TORQUE_ENABLE, 1 if on else 0, "torque")
+            done.append(sid)
+        return done
+
+    def positions(self, sids):
+        """{sid: counts}, skipping any servo that will not answer."""
+        out = {}
+        for sid in sids:
+            try:
+                out[sid] = self.read2(sid, ADDR_PRESENT_POSITION, "position")
+            except (BusError, ArbiterError):
+                pass
+        return out
+
+    def move(self, targets, speed=None, timeout=4.0,
+             tolerance=POSITION_TOLERANCE):
+        """Drive {sid: counts} and wait for arrival.
+
+        Every target is clamped to that servo's firmware limits first, and
+        the clamp is reported rather than silently applied -- a caller
+        asking for somewhere the joint cannot go has a bug worth seeing.
+
+        Returns {"reached": {...}, "short": {...}, "clamped": {...}}.
+        'short' is not an error here: a loaded joint that stops early is
+        information for the layer above, which knows what it meant.
+        """
+        clamped = {}
+        goals = {}
+        for sid, want in targets.items():
+            lo, hi = self.limits(sid)
+            if lo > hi:                      # unset or wheel mode
+                lo, hi = 0, 4095
+            got = max(lo, min(hi, int(want)))
+            if got != int(want):
+                clamped[sid] = {"asked": int(want), "allowed": got,
+                                "limits": [lo, hi]}
+            goals[sid] = got
+
+        for sid, goal in goals.items():
+            if speed is not None:
+                self.write2(sid, ADDR_GOAL_SPEED, int(speed), "speed")
+            self.write1(sid, ADDR_TORQUE_ENABLE, 1, "torque")
+            self.write2(sid, ADDR_GOAL_POSITION, goal, "goal")
+
+        deadline = time.monotonic() + timeout
+        reached, short = {}, {}
+        while time.monotonic() < deadline:
+            here = self.positions(list(goals))
+            short = {s: {"at": p, "wanted": goals[s]}
+                     for s, p in here.items()
+                     if abs(p - goals[s]) > tolerance}
+            if not short:
+                reached = here
+                break
+            time.sleep(0.05)
+        else:
+            reached = {s: p for s, p in self.positions(list(goals)).items()
+                       if s not in short}
+
+        return {"reached": reached, "short": short, "clamped": clamped}
 
 
 def describe(sid):

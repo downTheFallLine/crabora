@@ -144,3 +144,51 @@ answer than a 500.
 - The live model path is **untested** — there were no Anthropic
   credentials on the machine it was written on. Tool wiring, schemas and
   the degraded path are verified; the first real request is not.
+
+## Motion
+
+Motion is gated. Three different kinds of check stand between a sentence
+in the chat box and a servo moving:
+
+1. **ARMED** (`safety.py`) — a human pressed ARM, opening a time window.
+   The agent cannot arm itself: `/api/arm` is a route the tool layer has
+   no way to call. The window expires on idle (5 min), has a hard
+   session ceiling (30 min), and is dropped immediately by STOP.
+2. **PREFLIGHT** (`motion.py`) — bus up, nothing latched, nothing over
+   65 °C, supply not sagging below 6.2 V. A brownout reads exactly like
+   a wiring fault, so it is worth refusing rather than debugging.
+3. **SHAPE** — the move is one of a fixed set with bounded arguments.
+   `turn` takes 90/180/270/360 and nothing else; `nudge_joint` is capped
+   at ±20°. The schemas state the bounds so the model usually asks for
+   something legal; `motion.py` enforces them because "usually" is not a
+   safety property. Servo firmware limits clamp underneath all of it.
+
+**Nothing here invents a trajectory.** Two tibias have snapped from
+motions that looked geometrically reasonable. Every sequence is the one
+debugged against hardware — `stand.py`'s phase ordering, `turn.py`'s
+planted-foot sweep, `dance.py`'s frames — called as a library. Where the
+sequence was buried in a `main()`, it was lifted out (`turn.run_turn`)
+rather than copied, so the CLI and the agent run the same code.
+
+| tool | blast radius |
+|---|---|
+| `relax` | drops torque; a standing robot sits down |
+| `nudge_joint` | one joint, ±20°, relative |
+| `lay_down` | splay flat — all joints centred, femurs last |
+| `sit` | compact pose, held under torque |
+| `stand_up` | full recovery: collapse, untangle, stand |
+| `turn` | planted-foot, clockwise only |
+| `dance` | highest frame rate, most servos at once |
+
+`lay_down` is `pose_splay()`, which is every joint at centre — that is
+how the conventions were chosen. It moves coxa, then tibia, then femur:
+femurs last is the lesson from the tibia that snapped, since the other
+order drives a flexed knee into the floor.
+
+### Interrupting
+
+Long motions poll `arbiter.stopping` between steps. STOP sets that flag
+*without* taking the bus lock — otherwise a 30-second dance holding the
+lock would make STOP wait for it, which is the one thing it must never
+do. The motion drops out at its next step, then STOP takes the bus and
+releases torque.

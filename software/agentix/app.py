@@ -19,7 +19,9 @@ Endpoints:
 arbiter, so it works when the model is slow, confused, unreachable, or
 out of credit. That is the whole point of it being a button.
 
-PHASE 1 IS READ ONLY. No tool here moves a servo. See tools.py.
+Motion is gated by arming: POST /api/arm opens a time window, and
+nothing moves outside one. The agent cannot call /api/arm -- that route
+exists for the human on the control strip. See safety.py and motion.py.
 
 Usage:
     python3 agentix/app.py
@@ -44,7 +46,9 @@ except ImportError:
     print("flask is not installed:  python3 -m pip install flask")
     sys.exit(1)
 
-from arbiter import Arbiter, ArbiterError, Busy      # noqa: E402
+from arbiter import Arbiter, ArbiterError, Busy, Cancelled  # noqa: E402
+from motion import MOTION_HELP, MOTION_TOOLS, Unsafe   # noqa: E402
+from safety import NotArmed, Safety                    # noqa: E402
 from tools import READ_ONLY_TOOLS, TOOL_HELP         # noqa: E402
 
 WEB_DIR = os.path.join(_HERE, "web")
@@ -52,6 +56,9 @@ WEB_DIR = os.path.join(_HERE, "web")
 app = Flask(__name__, static_folder=None)
 ARB = None
 AGENT = None
+# The arming gate. Lives here, beside the HTTP routes, because arming is
+# a human action over a route the tool layer cannot call.
+SAFE = Safety()
 # Why the agent is off, in the words of whatever actually failed. Without
 # this the reason reached only the Pi's console at startup, so a browser
 # on another machine could not tell a missing API key from a missing
@@ -86,7 +93,8 @@ def health():
         "bus": {"available": ARB.available, "detail": ARB.reason},
         "agent": AGENT.describe() if AGENT else
                  {"enabled": False, "reason": AGENT_REASON},
-        "phase": "read-only",
+        "safety": SAFE.state(),
+        "phase": "motion (armed)" if SAFE.state()["armed"] else "read-only",
     })
 
 
@@ -104,9 +112,71 @@ def status():
 
 @app.get("/api/tools")
 def list_tools():
-    return jsonify({"ok": True, "phase": "read-only",
-                    "tools": [{"name": n, "description": TOOL_HELP.get(n, "")}
-                              for n in sorted(READ_ONLY_TOOLS)]})
+    return jsonify({
+        "ok": True,
+        "safety": SAFE.state(),
+        "tools": [{"name": n, "description": TOOL_HELP.get(n, ""),
+                   "moves": False} for n in sorted(READ_ONLY_TOOLS)] +
+                 [{"name": n, "description": MOTION_HELP.get(n, ""),
+                   "moves": True} for n in sorted(MOTION_TOOLS)],
+    })
+
+
+# =============================================================
+# ARMING -- human only
+# =============================================================
+# These routes are the whole reason the agent cannot move the robot by
+# itself. Nothing in tools.py, motion.py or agent.py can reach them: the
+# model can ask to move, and a person decides whether that is allowed.
+@app.post("/api/arm")
+def arm():
+    if not ARB.available:
+        return _fail(f"bus unavailable: {ARB.reason}", 503)
+    body = request.get_json(silent=True) or {}
+    state = SAFE.arm(who=str(body.get("who", "operator"))[:40])
+    ARB.clear_stop()
+    return jsonify({"ok": True, "safety": state})
+
+
+@app.post("/api/disarm")
+def disarm():
+    return jsonify({"ok": True,
+                    "safety": SAFE.disarm("disarmed from the control strip")})
+
+
+@app.post("/api/motion/<name>")
+def call_motion(name):
+    """Run a motion directly, for the control strip buttons.
+
+    Same gates as the agent path -- the buttons are a shortcut for the
+    human, not a way round the arming window.
+    """
+    fn = MOTION_TOOLS.get(name)
+    if fn is None:
+        return _fail(f"no such motion: {name}", 404,
+                     available=sorted(MOTION_TOOLS))
+    if not ARB.available:
+        return _fail(f"bus unavailable: {ARB.reason}", 503)
+    kwargs = request.get_json(silent=True) or {}
+    try:
+        return jsonify({"ok": True, "motion": name,
+                        "result": fn(ARB, SAFE, **kwargs),
+                        "safety": SAFE.state()})
+    except NotArmed as e:
+        return _fail(str(e), 403, safety=SAFE.state())
+    except Unsafe as e:
+        return _fail(str(e), 409)
+    except Cancelled as e:
+        return _fail(str(e), 409)
+    except TypeError as e:
+        return _fail(f"bad arguments for {name}: {e}", 400)
+    except Busy as e:
+        return _fail(str(e), 409)
+    except ArbiterError as e:
+        return _fail(str(e), 503)
+    except Exception as e:                            # noqa: BLE001
+        traceback.print_exc()
+        return _fail(f"{type(e).__name__}: {e}")
 
 
 @app.post("/api/tools/<name>")
@@ -160,7 +230,12 @@ def chat():
 @app.post("/api/stop")
 def stop():
     """EMERGENCY STOP. Deliberately not routed through the agent: it has
-    to work when the model is slow, confused or unreachable."""
+    to work when the model is slow, confused or unreachable.
+
+    Disarms as well as releasing torque. Someone who hits STOP wants the
+    robot to stop, not to stop and then be free to move again the moment
+    the next sentence is typed. Re-arming is a deliberate act."""
+    SAFE.disarm("emergency stop")
     if not ARB.available:
         return _fail(f"bus unavailable: {ARB.reason} -- CUT THE SERVO POWER", 503)
     try:
@@ -240,7 +315,7 @@ def main():
 
     try:
         from agent import build_agent
-        AGENT = build_agent(ARB)
+        AGENT = build_agent(ARB, SAFE)
         print(f"  agent: {AGENT.describe()['model']}")
     except Exception as e:                            # noqa: BLE001
         AGENT = None

@@ -1,0 +1,494 @@
+"""
+motion -- what the agent may actually do to the robot, and when.
+
+Three gates stand between a sentence in the chat box and a servo moving,
+deliberately different in kind:
+
+  1. ARMED (safety.py). A human opened a time window. The agent cannot
+     open it, and it closes on its own.
+  2. PREFLIGHT (here). The robot is worth trusting right now: bus up,
+     nothing latched, nothing cooking, supply not sagging.
+  3. SHAPE (here, plus the schemas in tools.py). The move is one of a
+     handful of known-good shapes with bounded arguments. The model
+     picks between them; it does not compose joint angles.
+
+Gate 3 matters most. Two tibias have snapped already, both from motions
+that looked geometrically reasonable and were not, so NOTHING HERE
+INVENTS A TRAJECTORY. Every sequence is the one that was debugged
+against hardware -- stand.py's phase ordering, turn.py's planted-foot
+sweep, dance.py's frames -- called as a library. Where those programs
+had the sequence buried in main(), it was lifted out rather than copied,
+so there is one implementation and the CLI exercises the same code the
+agent does.
+
+Long motions poll for cancellation between steps. A dance that cannot be
+interrupted is worse than no dance.
+"""
+
+import math
+import os
+import sys
+import time
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+_SOFTWARE = os.path.dirname(_HERE)
+for _d in ("walk", "stand", "turn", "dance"):
+    sys.path.insert(0, os.path.join(_SOFTWARE, _d))
+
+from gait_lib import (  # noqa: E402
+    ALL_LEGS, CENTER_POSITION, COXA_JOINT_DIGIT, FEMUR_JOINT_DIGIT,
+    JOINT_NAME, TIBIA_JOINT_DIGIT, ADDR_MAX_ANGLE, ADDR_MIN_ANGLE,
+    ADDR_PRESENT_POSITION, ADDR_PRESENT_TEMP, to_counts, to_degrees,
+)
+from arbiter import ArbiterError, Cancelled, describe  # noqa: E402
+
+ADDR_PRESENT_VOLTAGE = 62
+ADDR_SERVO_STATUS    = 65
+ERROR_FLAGS = {0: "Voltage", 1: "Sensor", 2: "Temperature",
+               3: "Current", 4: "Angle", 5: "Overload"}
+
+JOINT_DIGITS = (COXA_JOINT_DIGIT, FEMUR_JOINT_DIGIT, TIBIA_JOINT_DIGIT)
+NAME_TO_DIGIT = {v: k for k, v in JOINT_NAME.items()}
+
+# Refuse above this. The servos trip their own protection higher up; past
+# here, continuing just cooks them.
+TEMP_REFUSE_C = 65
+
+# The LM2596 is not regulating and has ~1 V of headroom against a 2 V
+# dropout spec. Below this the servos are browning out, and a brownout
+# reads exactly like a wiring fault -- which is how an evening gets lost.
+VOLTAGE_FLOOR = 6.2
+
+NUDGE_MAX_DEG = 20.0      # a wrong sign should be a twitch, not a strike
+MOVE_SPEED  = 400
+NUDGE_SPEED = 300
+
+
+class Unsafe(RuntimeError):
+    """Refused before anything moved. The message is for the operator."""
+
+
+# =============================================================
+# SHARED
+# =============================================================
+def _limits(s, legs):
+    """{(leg, digit): (min, max)} straight from servo firmware.
+
+    The phases in stand.py, turn.py and dance.py all expect this shape.
+    Firmware limits are the robot's own account of where it may go: set
+    per joint on hardware, and they outlive any bug in this process.
+    """
+    found = s.joints()
+    out = {}
+    for leg in legs:
+        for d in JOINT_DIGITS:
+            if leg in found.get(d, {}):
+                sid = leg * 10 + d
+                out[(leg, d)] = (s.read2(sid, ADDR_MIN_ANGLE, "min"),
+                                 s.read2(sid, ADDR_MAX_ANGLE, "max"))
+    return out
+
+
+def preflight(arbiter, legs=None):
+    """Read the robot and decide whether it should move at all.
+
+    Raises Unsafe on a blocker, returns what it found otherwise. The
+    distinction matters: a warm servo is worth mentioning, a latched
+    overload means the joint has already given up and commanding it
+    achieves nothing but noise.
+    """
+    legs = sorted(legs or ALL_LEGS)
+    faults, hot, flat, missing, volts = [], [], [], [], []
+
+    with arbiter.session("preflight") as s:
+        found = s.joints()
+        for digit in JOINT_DIGITS:
+            present = found.get(digit, {})
+            for leg in legs:
+                sid = leg * 10 + digit
+                if leg not in present:
+                    missing.append(sid)
+                    continue
+                try:
+                    st = s.read1(sid, ADDR_SERVO_STATUS, "status")
+                    if st:
+                        faults.append({"servo": sid, "where": describe(sid),
+                                       "flags": [n for b, n in ERROR_FLAGS.items()
+                                                 if st & (1 << b)]})
+                    t = s.read1(sid, ADDR_PRESENT_TEMP, "temp")
+                    if t >= TEMP_REFUSE_C:
+                        hot.append({"servo": sid, "where": describe(sid),
+                                    "temp_c": t})
+                    v = s.read1(sid, ADDR_PRESENT_VOLTAGE, "voltage") / 10.0
+                    volts.append(v)
+                    if v < VOLTAGE_FLOOR:
+                        flat.append({"servo": sid, "where": describe(sid),
+                                     "volts": round(v, 1)})
+                except ArbiterError:
+                    missing.append(sid)
+
+    report = {"legs": legs, "faults": faults, "hot": hot, "undervolt": flat,
+              "missing": sorted(set(missing)),
+              "volts_min": round(min(volts), 1) if volts else None}
+
+    if faults:
+        raise Unsafe(f"{len(faults)} joint(s) latched in error -- clear them "
+                     f"before moving: " +
+                     ", ".join(f["where"] for f in faults))
+    if hot:
+        raise Unsafe("too hot to move: " +
+                     ", ".join(f"{h['where']} {h['temp_c']}C" for h in hot))
+    if flat:
+        raise Unsafe(f"supply sagging below {VOLTAGE_FLOOR}V "
+                     f"(min {report['volts_min']}V) -- the servos are "
+                     f"browning out, which mimics a wiring fault. Check the "
+                     f"buck converter.")
+    if len(report["missing"]) > 3:
+        raise Unsafe(f"{len(report['missing'])} servos are not answering; the "
+                     f"bus is not healthy enough to move")
+    return report
+
+
+def _gate(arbiter, safety, legs=None):
+    """Cheap permission check first, then the expensive bus read."""
+    safety.require()                 # raises NotArmed
+    arbiter.clear_stop()             # an old stop should not linger
+    return preflight(arbiter, legs)
+
+
+def _done(safety, result):
+    safety.touch()
+    return result
+
+
+def _usable_legs(s, legs):
+    """Legs with all three joints answering. The phases assume this."""
+    found = s.joints()
+    return [l for l in legs if all(l in found.get(d, {})
+                                   for d in JOINT_DIGITS)]
+
+
+# =============================================================
+# MOTIONS, in order of blast radius
+# =============================================================
+def relax(arbiter, safety, legs=None):
+    """Drop torque.
+
+    NOT harmless: if the robot is holding itself up it sits down under
+    its own weight. It still does it, because "go limp" is also what you
+    want when a leg is straining and the alternative is a snapped tibia
+    -- but it reports whether it looked loaded rather than deciding.
+    """
+    safety.require()
+    legs = sorted(legs or ALL_LEGS)
+    sids = [leg * 10 + d for leg in legs for d in JOINT_DIGITS]
+
+    with arbiter.session("relax") as s:
+        before = s.positions(sids)
+        femurs = [p for sid, p in before.items()
+                  if sid % 10 == FEMUR_JOINT_DIGIT]
+        loaded = sum(1 for p in femurs
+                     if abs(p - CENTER_POSITION) > to_counts(25)) >= 4
+        released = s.torque(sids, on=False)
+
+    return _done(safety, {
+        "action": "relax", "legs": legs, "released": sorted(released),
+        "was_bearing_weight": loaded,
+        "note": ("it was holding a pose, so it has just sat down" if loaded
+                 else "it was not obviously bearing weight"),
+    })
+
+
+def nudge(arbiter, safety, leg: int, joint: str, degrees: float):
+    """Move ONE joint a bounded amount, relative to where it is now.
+
+    The lowest-blast-radius real motion: one joint, small angle, relative
+    so it cannot fling anywhere. Firmware limits clamp underneath and the
+    clamp is reported.
+    """
+    if leg not in ALL_LEGS:
+        raise Unsafe(f"leg must be 1-6, got {leg}")
+    digit = NAME_TO_DIGIT.get(str(joint).lower())
+    if digit is None:
+        raise Unsafe(f"joint must be coxa, femur or tibia, got {joint!r}")
+    try:
+        degrees = float(degrees)
+    except (TypeError, ValueError):
+        raise Unsafe(f"degrees must be a number, got {degrees!r}")
+    if not -NUDGE_MAX_DEG <= degrees <= NUDGE_MAX_DEG:
+        raise Unsafe(f"nudge is limited to +/-{NUDGE_MAX_DEG:g} degrees; "
+                     f"asked {degrees:g}. Use a pose command for more.")
+
+    _gate(arbiter, safety, legs=[leg])
+    sid = leg * 10 + digit
+    with arbiter.session(f"nudge {sid}") as s:
+        start = s.read2(sid, ADDR_PRESENT_POSITION, "position")
+        res = s.move({sid: start + to_counts(degrees)},
+                     speed=NUDGE_SPEED, timeout=3.0)
+        end = s.read2(sid, ADDR_PRESENT_POSITION, "position")
+
+    return _done(safety, {
+        "action": "nudge", "joint": describe(sid), "asked_deg": degrees,
+        "moved_deg": round(to_degrees(end - start), 1),
+        "clamped": res["clamped"] or None,
+        "note": "clamped by the joint's own travel limit"
+                if res["clamped"] else None,
+    })
+
+
+def lay_down(arbiter, safety, legs=None):
+    """Splay flat: every joint to its centre.
+
+    pose_splay() is exactly all-centres -- that is how the conventions
+    were chosen (coxa neutral, femur horizontal, tibia collinear). It is
+    the safest pose to pass through, because nothing is folded, so
+    nothing can be caught on anything.
+
+    The ORDER is the lesson from the tibia that snapped: straighten the
+    knees while the femurs are still up, and bring the femurs down last.
+    The other way drives a flexed tibia into the floor.
+    """
+    legs = sorted(legs or ALL_LEGS)
+    _gate(arbiter, safety, legs)
+
+    steps = []
+    with arbiter.session("lay down") as s:
+        legs = _usable_legs(s, legs) or legs
+        for digit in (COXA_JOINT_DIGIT, TIBIA_JOINT_DIGIT, FEMUR_JOINT_DIGIT):
+            arbiter.check_cancel()
+            res = s.move({leg * 10 + digit: CENTER_POSITION for leg in legs},
+                         speed=MOVE_SPEED, timeout=6.0)
+            steps.append({"joint": JOINT_NAME[digit],
+                          "reached": len(res["reached"]),
+                          "short": sorted(res["short"])})
+
+    return _done(safety, {
+        "action": "lay_down", "pose": "splay (all joints centred)",
+        "legs": legs, "order": "coxa, tibia, femur -- femurs last",
+        "steps": steps,
+    })
+
+
+def sit(arbiter, safety):
+    """Fold to a low, stable pose and hold it under torque.
+
+    Distinct from relax(): puts the body down deliberately rather than
+    dropping it.
+    """
+    _gate(arbiter, safety)
+    from pose import pose_compact                    # noqa: PLC0415
+
+    p = pose_compact()
+    with arbiter.session("sit") as s:
+        legs = _usable_legs(s, sorted(ALL_LEGS))
+        for digit, key in ((TIBIA_JOINT_DIGIT, "tibia"),
+                           (FEMUR_JOINT_DIGIT, "femur")):
+            arbiter.check_cancel()
+            s.move({leg * 10 + digit: CENTER_POSITION - to_counts(p[key])
+                    for leg in legs}, speed=MOVE_SPEED, timeout=6.0)
+
+    return _done(safety, {"action": "sit",
+                          "pose": {k: round(v, 1) for k, v in p.items()}})
+
+
+def stand(arbiter, safety, height: float = 80.0):
+    """Stand up, through stand.py's phases.
+
+    Not reimplemented. Collapse, untangle and stand -- with the floor
+    guards and the femur-last ordering -- are the part that was debugged
+    against a robot that kept breaking, and they earn their reuse.
+    """
+    try:
+        height = float(height)
+    except (TypeError, ValueError):
+        raise Unsafe(f"height must be a number, got {height!r}")
+    if not 40.0 <= height <= 160.0:
+        raise Unsafe(f"stand height must be 40-160 mm, got {height:g}")
+
+    _gate(arbiter, safety)
+    import stand as prog                             # noqa: PLC0415
+
+    phases = []
+    with arbiter.session(f"stand {height:g}mm") as s:
+        packet, legs = s.packet, sorted(ALL_LEGS)
+        joints = s.joints()
+        _ok, excluded = prog.phase_survey(packet, joints, legs)
+        legs = [l for l in legs if l not in excluded]
+        if not legs:
+            raise Unsafe("no usable legs -- survey excluded all six")
+        limits = _limits(s, legs)
+
+        arbiter.check_cancel()
+        prog.phase_collapse(packet, joints, legs, limits, False)
+        phases.append("collapse")
+
+        arbiter.check_cancel()
+        prog.phase_untangle(packet, joints, legs, limits, False)
+        phases.append("untangle")
+
+        arbiter.check_cancel()
+        # stand.py has no module-level foot-out constant; 120 mm is its
+        # own argparse default.
+        prog.phase_stand(packet, joints, legs, limits, height, 120.0, False)
+        phases.append("stand")
+
+    return _done(safety, {"action": "stand", "height_mm": height,
+                          "legs": legs, "excluded": sorted(excluded),
+                          "phases": phases})
+
+
+def turn(arbiter, safety, degrees: int):
+    """Turn clockwise, via turn.py's planted-foot sweep.
+
+    Constrained to the four angles that program was built for. Anything
+    else is a different program, not a different argument.
+    """
+    try:
+        degrees = int(degrees)
+    except (TypeError, ValueError):
+        raise Unsafe(f"degrees must be a number, got {degrees!r}")
+    if degrees not in (90, 180, 270, 360):
+        raise Unsafe(f"turn takes 90, 180, 270 or 360 degrees, got {degrees}")
+
+    _gate(arbiter, safety)
+    import turn as prog                              # noqa: PLC0415
+    from pose import Unreachable, pose_stand         # noqa: PLC0415
+
+    height = prog.DEFAULT_HEIGHT
+    try:
+        base = pose_stand(height)
+    except Unreachable as e:
+        raise Unsafe(f"cannot stand at {height:g} mm: {e}")
+
+    # Same arithmetic as turn.py's main(), with its defaults.
+    r_foot = prog.planted_radius(base)
+    cap = prog.max_rotation(height, r_foot, 50.0)
+    per_step_max = min(prog.DEFAULT_STEP, 2 * cap)
+    n_steps = max(1, math.ceil(degrees / per_step_max))
+    per_step = degrees / n_steps
+    half = per_step / 2
+
+    with arbiter.session(f"turn {degrees}") as s:
+        legs = _usable_legs(s, sorted(ALL_LEGS))
+        if len(legs) < 6:
+            raise Unsafe(f"turning needs all six legs; {sorted(legs)} answered")
+        outcome = prog.run_turn(
+            s.packet, s.joints(), legs, _limits(s, legs), base,
+            half=half, per_step=per_step, n_steps=n_steps, height=height,
+            r_foot=r_foot, lift=prog.DEFAULT_LIFT, speed=prog.DEFAULT_SPEED,
+            substeps=5, degrees=degrees,
+            should_cancel=lambda: arbiter.stopping,
+            log=lambda *a, **k: None)
+
+    return _done(safety, {
+        "action": "turn", "degrees": degrees, "clockwise": True,
+        "turned_deg": round(outcome["total"], 1),
+        "steps_done": outcome["steps_done"], "cancelled": outcome["cancelled"],
+        "legs_short_on": {str(k): sorted(v)
+                          for k, v in outcome["trouble"].items()} or None,
+    })
+
+
+def dance(arbiter, safety, seconds: float = 10.0):
+    """Dance for a bounded time, one verified frame at a time.
+
+    dance.py's MOVES are frame generators and play() sends one frame, so
+    this drives them directly and checks for a stop between frames --
+    which is what makes it interruptible.
+    """
+    try:
+        seconds = float(seconds)
+    except (TypeError, ValueError):
+        raise Unsafe(f"seconds must be a number, got {seconds!r}")
+    if not 2.0 <= seconds <= 30.0:
+        raise Unsafe(f"dance runs 2-30 seconds, got {seconds:g}")
+
+    _gate(arbiter, safety)
+    import dance as prog                             # noqa: PLC0415
+    from pose import Unreachable, pose_stand         # noqa: PLC0415
+
+    height = getattr(prog, "DEFAULT_HEIGHT", 80.0)
+    amp = getattr(prog, "DEFAULT_AMP", 12.0)
+    beat = getattr(prog, "BEAT", 0.12)        # dance.py calls it BEAT
+    try:
+        base = pose_stand(height)
+    except Unreachable as e:
+        raise Unsafe(f"cannot stand at {height:g} mm to dance: {e}")
+
+    played, moves_done = 0, []
+    deadline = time.monotonic() + seconds
+    cancelled = False
+
+    with arbiter.session(f"dance {seconds:g}s") as s:
+        legs = _usable_legs(s, sorted(ALL_LEGS))
+        if len(legs) < 6:
+            raise Unsafe(f"dancing needs all six legs; {sorted(legs)} answered")
+        limits = _limits(s, legs)
+        names = sorted(prog.MOVES)
+
+        while time.monotonic() < deadline and not cancelled:
+            for name in names:
+                if time.monotonic() >= deadline:
+                    break
+                moves_done.append(name)
+                for frame, _note in prog.MOVES[name](base, legs, amp, height):
+                    if arbiter.stopping or time.monotonic() >= deadline:
+                        cancelled = arbiter.stopping
+                        break
+                    prog.play(s.packet, s.joints(), legs, limits, frame, beat)
+                    played += 1
+
+        # Leave it standing rather than mid-flourish.
+        if not arbiter.stopping:
+            prog.play(s.packet, s.joints(), legs, limits,
+                      {l: base for l in legs}, 0)
+
+    return _done(safety, {
+        "action": "dance", "seconds": seconds, "frames": played,
+        "moves": sorted(set(moves_done)), "cancelled": cancelled,
+    })
+
+
+MOTION_TOOLS = {
+    "relax": relax,
+    "nudge_joint": nudge,
+    "lay_down": lay_down,
+    "sit": sit,
+    "stand_up": stand,
+    "turn": turn,
+    "dance": dance,
+}
+
+
+MOTION_HELP = {
+    "relax": (
+        "Drop torque so the legs go limp. If the robot is standing it "
+        "WILL sit down under its own weight. Use it to stop a joint "
+        "straining. Optional: legs, a list of 1-6; default all six."),
+    "nudge_joint": (
+        "Move one joint a small amount from where it is now: leg 1-6, "
+        f"joint 'coxa'|'femur'|'tibia', degrees +/-{NUDGE_MAX_DEG:g}. "
+        "Positive is forward for a coxa, up for a femur, extend for a "
+        "tibia. The smallest real motion available -- prefer it when "
+        "checking whether something moves at all."),
+    "lay_down": (
+        "Splay flat: every joint to centre, so the legs lie straight out "
+        "and the body rests down. Moves coxa, then tibia, then femur, "
+        "which is the order that cannot drive a foot into the floor. The "
+        "safest pose to be in or pass through."),
+    "sit": (
+        "Fold to a low compact pose and HOLD it under torque. Unlike "
+        "relax, the body is placed down deliberately rather than dropped."),
+    "stand_up": (
+        "Stand up from any pose, including a tangled one. Runs the full "
+        "recovery: collapse, untangle leg by leg, then stand. Optional "
+        "height, 40-160 mm of deck clearance, default 80. Takes tens of "
+        "seconds and is the highest-current thing the robot does."),
+    "turn": (
+        "Turn clockwise in place by 90, 180, 270 or 360 degrees. The "
+        "robot must already be standing. Always clockwise -- there is no "
+        "anticlockwise turn."),
+    "dance": (
+        "Dance for 2-30 seconds, default 10, then return to standing. "
+        "The robot must already be standing."),
+}

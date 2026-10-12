@@ -150,6 +150,108 @@ def max_rotation(height, r_foot, coxa_limit):
 # =============================================================
 # MAIN
 # =============================================================
+def run_turn(packet, joints, legs, limits, base, *, half, per_step, n_steps,
+             height, r_foot, lift, speed, substeps, degrees,
+             should_cancel=None, log=print):
+    """The turn itself: setup, alternating tripods, back to neutral.
+
+    Lifted out of main() so the agent layer runs this exact sequence
+    rather than a second copy of it. main() still owns argument handling
+    and the reporting around it.
+
+    should_cancel() is polled once per step. A turn is many seconds long,
+    so without it a stop request would have to wait for the whole thing.
+    Returns {"total", "steps_done", "trouble", "cancelled"}.
+    """
+    # Torque and speed live here, not in the caller, so the CLI and the
+    # agent start from an identical servo state.
+    for dg, _ in JOINTS:
+        for leg in legs:
+            sid, port = joints[dg][leg]
+            write2(packet, port, sid, ADDR_GOAL_SPEED, speed, "speed")
+            write1(packet, port, sid, ADDR_TORQUE_ENABLE, 1, "torque on")
+
+    def send(frame, tag):
+        group, targets = {}, {}
+        for leg, pose in frame.items():
+            counts = pose_counts(pose)
+            for dg, _ in JOINTS:
+                group[(leg, dg)] = joints[dg][leg]
+                targets[(leg, dg)] = clamp(counts[dg], limits[(leg, dg)])
+        results = move_group(packet, group, targets, LOADED_TOLERANCE)
+        bad = [k for k, (p, to) in results.items()
+               if to or abs(p - targets[k]) > LOADED_TOLERANCE]
+        return bad
+
+    # Every leg starts holding its foot with the body pre-rotated
+    # back by half a step, so the first sweep is a full one.
+    log("\n  -> set up")
+    start = {l: stance_pose(l, -half, height, r_foot) for l in legs}
+    send(start, "setup")
+
+    trouble = {}
+    total = 0.0
+    for i in range(1, n_steps + 1):
+        stance = TRIPOD_B if i % 2 else TRIPOD_A
+        swing = TRIPOD_A if i % 2 else TRIPOD_B
+        tag = "B" if i % 2 else "A"
+        log(f"  step {i}/{n_steps} (stance {tag}):", end="", flush=True)
+        if should_cancel is not None and should_cancel():
+            return {"total": total, "steps_done": i - 1, "trouble": trouble,
+                    "cancelled": True}
+
+        # LIFT: femur only. Moving a coxa here would drag a foot that
+        # is still on the floor and pull the body back round.
+        frame = {l: (dict(start[l], femur=start[l]["femur"] + lift)
+                     if l in swing else dict(start[l]))
+                 for l in legs}
+        for k in send(frame, "lift"):
+            trouble.setdefault(k[0], set()).add("lift")
+        log(" lift", end="", flush=True)
+
+        # SWEEP: walk the body round in interpolated points. At each
+        # one the stance legs are re-solved to hold their feet on the
+        # SAME patch of floor -- that is the whole point, and why
+        # there is no scrub to slip on.
+        reset = {l: stance_pose(l, -half, height, r_foot)
+                 for l in swing}
+        for j in range(1, substeps + 1):
+            frac = j / substeps
+            rho = -half + (2 * half) * frac
+            frame = {}
+            for l in legs:
+                if l in stance:
+                    frame[l] = stance_pose(l, rho, height, r_foot)
+                else:
+                    # swinging: glide to the reset pose, staying up
+                    a, b = start[l], reset[l]
+                    frame[l] = {k: a[k] + (b[k] - a[k]) * frac
+                                for k in ("coxa", "femur", "tibia")}
+                    frame[l]["femur"] += lift
+            for k in send(frame, "sweep"):
+                trouble.setdefault(k[0], set()).add("sweep")
+        log(" sweep", end="", flush=True)
+
+        # PLANT: femur down, everything else held.
+        landed = {}
+        for l in legs:
+            landed[l] = (stance_pose(l, +half, height, r_foot)
+                         if l in stance else reset[l])
+        for k in send(landed, "plant"):
+            trouble.setdefault(k[0], set()).add("plant")
+        total += per_step
+        log(f" plant   ({total:.1f}° of {degrees}°)")
+
+        # The stance legs are now at +half; next step they swing. The
+        # legs just planted are at -half and become stance.
+        start = landed
+
+    log("\n  -> back to neutral stance")
+    send({l: base for l in legs}, "finish")
+    return {"total": total, "steps_done": n_steps, "trouble": trouble,
+            "cancelled": False}
+
+
 def main():
     ap = argparse.ArgumentParser(
         description="CRABORA: turn in place, clockwise.",
@@ -282,90 +384,19 @@ def main():
                     read2(packet, port, sid, ADDR_MIN_ANGLE, "min"),
                     read2(packet, port, sid, ADDR_MAX_ANGLE, "max"))
 
-        for sid, port in servos:
-            write2(packet, port, sid, ADDR_GOAL_SPEED, args.speed, "speed")
-            write1(packet, port, sid, ADDR_TORQUE_ENABLE, 1, "torque on")
-
         if args.pause and not confirm(
                 f"Standing, clear of obstacles, and ready to turn "
                 f"{args.degrees}° clockwise?"):
             print("\n  Stopped.")
             return 1
 
-        def send(frame, tag):
-            group, targets = {}, {}
-            for leg, pose in frame.items():
-                counts = pose_counts(pose)
-                for dg, _ in JOINTS:
-                    group[(leg, dg)] = joints[dg][leg]
-                    targets[(leg, dg)] = clamp(counts[dg], limits[(leg, dg)])
-            results = move_group(packet, group, targets, LOADED_TOLERANCE)
-            bad = [k for k, (p, to) in results.items()
-                   if to or abs(p - targets[k]) > LOADED_TOLERANCE]
-            return bad
-
-        # Every leg starts holding its foot with the body pre-rotated
-        # back by half a step, so the first sweep is a full one.
-        print("\n  -> set up")
-        start = {l: stance_pose(l, -half, args.height, r_foot) for l in legs}
-        send(start, "setup")
-
-        trouble = {}
-        total = 0.0
-        for i in range(1, n_steps + 1):
-            stance = TRIPOD_B if i % 2 else TRIPOD_A
-            swing = TRIPOD_A if i % 2 else TRIPOD_B
-            tag = "B" if i % 2 else "A"
-            print(f"  step {i}/{n_steps} (stance {tag}):", end="", flush=True)
-
-            # LIFT: femur only. Moving a coxa here would drag a foot that
-            # is still on the floor and pull the body back round.
-            frame = {l: (dict(start[l], femur=start[l]["femur"] + args.lift)
-                         if l in swing else dict(start[l]))
-                     for l in legs}
-            for k in send(frame, "lift"):
-                trouble.setdefault(k[0], set()).add("lift")
-            print(" lift", end="", flush=True)
-
-            # SWEEP: walk the body round in interpolated points. At each
-            # one the stance legs are re-solved to hold their feet on the
-            # SAME patch of floor -- that is the whole point, and why
-            # there is no scrub to slip on.
-            reset = {l: stance_pose(l, -half, args.height, r_foot)
-                     for l in swing}
-            for j in range(1, args.substeps + 1):
-                frac = j / args.substeps
-                rho = -half + (2 * half) * frac
-                frame = {}
-                for l in legs:
-                    if l in stance:
-                        frame[l] = stance_pose(l, rho, args.height, r_foot)
-                    else:
-                        # swinging: glide to the reset pose, staying up
-                        a, b = start[l], reset[l]
-                        frame[l] = {k: a[k] + (b[k] - a[k]) * frac
-                                    for k in ("coxa", "femur", "tibia")}
-                        frame[l]["femur"] += args.lift
-                for k in send(frame, "sweep"):
-                    trouble.setdefault(k[0], set()).add("sweep")
-            print(" sweep", end="", flush=True)
-
-            # PLANT: femur down, everything else held.
-            landed = {}
-            for l in legs:
-                landed[l] = (stance_pose(l, +half, args.height, r_foot)
-                             if l in stance else reset[l])
-            for k in send(landed, "plant"):
-                trouble.setdefault(k[0], set()).add("plant")
-            total += per_step
-            print(f" plant   ({total:.1f}° of {args.degrees}°)")
-
-            # The stance legs are now at +half; next step they swing. The
-            # legs just planted are at -half and become stance.
-            start = landed
-
-        print("\n  -> back to neutral stance")
-        send({l: base for l in legs}, "finish")
+        outcome = run_turn(
+            packet, joints, legs, limits, base,
+            half=half, per_step=per_step, n_steps=n_steps,
+            height=args.height, r_foot=r_foot, lift=args.lift,
+            speed=args.speed, substeps=args.substeps, degrees=args.degrees)
+        trouble = outcome["trouble"]
+        total = outcome["total"]
 
         if trouble:
             print()
