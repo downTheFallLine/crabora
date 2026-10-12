@@ -248,3 +248,54 @@ pre {
   /* Not a hint that it is broken -- it is waiting for ARM. */
   cursor: not-allowed;
 }
+
+/* ---------------- formatted results ---------------- */
+.headline {
+  margin: 0 0 8px;
+  font-weight: 600;
+}
+
+.kvs { display: flex; flex-direction: column; gap: 3px; }
+
+.kv {
+  display: flex;
+  gap: 10px;
+  align-items: baseline;
+  font-size: 13.5px;
+}
+.kv .k {
+  color: var(--muted);
+  min-width: 112px;
+  flex: none;
+}
+.kv .v { color: var(--text); }
+
+.k.block {
+  color: var(--muted);
+  font-size: 13.5px;
+  margin-top: 6px;
+}
+
+.sub {
+  margin: 2px 0 2px 12px;
+  padding-left: 10px;
+  border-left: 1px solid var(--line);
+}
+
+.muted { color: var(--muted); margin: 0; }
+
+/* Raw JSON is still there, just not first. */
+details.raw { margin-top: 10px; }
+details.raw summary {
+  cursor: pointer;
+  font-size: 11px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+  color: var(--muted);
+  list-style: none;
+}
+details.raw summary::-webkit-details-marker { display: none; }
+details.raw summary::before { content: "\25b8 "; }
+details.raw[open] summary::before { content: "\25be "; }
+details.raw summary:hover { color: var(--text); }
+details.raw pre { margin-top: 8px; }

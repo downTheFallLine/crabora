@@ -33,9 +33,127 @@ function say(who, cls, build) {
 const sayText = (who, cls, text) =>
   say(who, cls, (b) => b.appendChild(el("p", null, text)));
 
+/* ---------------- rendering results ----------------
+ * Tool and motion results arrive as plain dicts. Dumping them as JSON is
+ * fine for debugging and bad for reading: a six-element leg list becomes
+ * six lines of punctuation. So format them, and keep the raw JSON one
+ * click away rather than deleting it.
+ */
+
+/* Keys whose value carries a unit, and what to show. */
+const UNITS = {
+  height_mm: "mm", moved_deg: "\u00b0", asked_deg: "\u00b0",
+  turned_deg: "\u00b0", degrees: "\u00b0", seconds: "s",
+  volts_min: "V", temp_c: "\u00b0C", reach_mm: "mm",
+  x_mm: "mm", y_mm: "mm", z_mm: "mm", apart_mm: "mm",
+};
+
+/* A one-line summary per action, so the first thing read is the outcome
+ * rather than the first key alphabetically. */
+function headline(d) {
+  switch (d.action) {
+    case "stand":
+      return `Stood up to ${d.height_mm} mm` +
+             (d.excluded && d.excluded.length
+               ? ` \u2014 without leg${d.excluded.length > 1 ? "s" : ""} ${d.excluded.join(", ")}`
+               : " \u2014 all six legs");
+    case "lay_down":   return "Laid out flat \u2014 all joints centred";
+    case "sit":        return "Sat down and holding";
+    case "relax":      return d.was_bearing_weight
+                              ? "Limp \u2014 it was holding a pose, so it has sat down"
+                              : "Limp \u2014 it was not bearing weight";
+    case "nudge":      return `${d.joint}: moved ${d.moved_deg}\u00b0` +
+                              (d.clamped ? " (clamped by its travel limit)" : "");
+    case "turn":       return `Turned ${d.turned_deg}\u00b0 clockwise` +
+                              (d.cancelled ? " \u2014 stopped early" : "");
+    case "dance":      return `Danced ${d.seconds}s, ${d.frames} frames` +
+                              (d.cancelled ? " \u2014 stopped early" : "");
+    default:           return null;
+  }
+}
+
+/* Keys the headline already covers, per action. Repeating them under a
+ * sentence that just said them is noise, and it buries the rows that
+ * actually carry new information. */
+const CONSUMED = {
+  stand:    ["height_mm", "legs", "excluded"],
+  lay_down: ["pose", "legs"],
+  sit:      [],
+  relax:    ["was_bearing_weight", "note", "legs"],
+  nudge:    ["joint", "moved_deg", "clamped", "note"],
+  turn:     ["turned_deg", "degrees", "clockwise", "cancelled"],
+  dance:    ["seconds", "frames", "cancelled"],
+};
+
+function fmtValue(key, v) {
+  if (v === null || v === undefined) return null;      // drop empty rows
+  if (Array.isArray(v)) {
+    if (!v.length) return "none";
+    if (v.every((x) => typeof x !== "object")) return v.join(", ");
+    return null;                                        // handled as a block
+  }
+  if (typeof v === "boolean") return v ? "yes" : "no";
+  if (typeof v === "object") return null;
+  const u = UNITS[key] || "";
+  return `${v}${u}`;
+}
+
+const prettyKey = (k) =>
+  k.replace(/_(mm|deg|c)$/, "").replace(/_/g, " ");
+
+function renderInto(box, data, depth, skip) {
+  skip = skip || [];
+  Object.entries(data).forEach(([k, v]) => {
+    if (k === "action") return;                         // in the headline
+    if (depth === 0 && skip.indexOf(k) !== -1) return;  // ditto
+    const flat = fmtValue(k, v);
+    if (flat !== null) {
+      const row = el("div", "kv");
+      row.appendChild(el("span", "k", prettyKey(k)));
+      row.appendChild(el("span", "v", flat));
+      box.appendChild(row);
+      return;
+    }
+    if (Array.isArray(v)) {                             // array of objects
+      box.appendChild(el("div", "k block", prettyKey(k)));
+      v.forEach((item) => {
+        const sub = el("div", "sub");
+        if (typeof item === "object" && item !== null) renderInto(sub, item, depth + 1);
+        else sub.appendChild(el("span", "v", String(item)));
+        box.appendChild(sub);
+      });
+      return;
+    }
+    if (v && typeof v === "object") {
+      box.appendChild(el("div", "k block", prettyKey(k)));
+      const sub = el("div", "sub");
+      renderInto(sub, v, depth + 1);
+      box.appendChild(sub);
+    }
+  });
+}
+
 const sayData = (who, data) =>
-  say(who, "bot", (b) =>
-    b.appendChild(el("pre", null, JSON.stringify(data, null, 2))));
+  say(who, "bot", (b) => {
+    if (data === null || typeof data !== "object") {
+      b.appendChild(el("p", null, String(data)));
+      return;
+    }
+    const head = headline(data);
+    if (head) b.appendChild(el("p", "headline", head));
+    const box = el("div", "kvs");
+    renderInto(box, data, 0, head ? (CONSUMED[data.action] || []) : []);
+    if (box.children.length) b.appendChild(box);
+    if (!head && !box.children.length) {
+      b.appendChild(el("p", "muted", "nothing to report"));
+    }
+    // Raw JSON stays available -- this is a debugging UI as much as a
+    // chat one, and the formatter will not know every future shape.
+    const det = el("details", "raw");
+    det.appendChild(el("summary", null, "raw"));
+    det.appendChild(el("pre", null, JSON.stringify(data, null, 2)));
+    b.appendChild(det);
+  });
 
 async function api(path, body) {
   const res = await fetch(path, {
