@@ -21,3 +21,8 @@ venv/
 
 # IMU calibration is per-robot, written by utils/calibrate_imu.py
 software/imu_calibration.json
+
+# agentix credentials. The real file lives at /etc/crabora/agentix.env on
+# the robot (root-owned, 0600); these patterns only catch a stray copy.
+*.env
+agentix.env

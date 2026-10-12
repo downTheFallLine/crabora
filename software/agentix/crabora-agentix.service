@@ -1,0 +1,47 @@
+[Unit]
+Description=CRABORA agentix -- robot web UI and read-only API
+Documentation=https://github.com/downTheFallLine/crabora
+# network-online, not just network: the banner resolves the LAN address at
+# startup, and on a Pi the Wi-Fi often is not up yet when network.target
+# fires. Without this the unit starts and prints a useless address.
+After=network-online.target
+Wants=network-online.target
+# Stop retrying if it fails 5 times in a minute -- a missing dependency
+# will not fix itself, and an endless restart loop buries the real error.
+# These belong in [Unit]: systemd >= 230 ignores them under [Service].
+StartLimitBurst=5
+StartLimitIntervalSec=60
+
+[Service]
+Type=simple
+User=__USER__
+Group=__USER__
+# dialout owns /dev/ttyUSB*. Without it the arbiter starts with the bus
+# unavailable and every tool answers 503 while the UI looks fine.
+SupplementaryGroups=dialout
+
+WorkingDirectory=__APPDIR__
+ExecStart=__PYTHON__ __APPDIR__/app.py --host 0.0.0.0 --port 5000
+
+# Secrets live here, 0600 and root-owned, NOT in the repo. The leading '-'
+# means a missing file is not a startup failure: the UI and every tool
+# still work without a key, only chat is disabled.
+EnvironmentFile=-/etc/crabora/agentix.env
+
+Restart=on-failure
+RestartSec=5
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=agentix
+
+# The servo bus is the thing worth protecting. These cost nothing here and
+# keep a web-facing process from wandering outside its own directory.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=__APPDIR__
+
+[Install]
+WantedBy=multi-user.target

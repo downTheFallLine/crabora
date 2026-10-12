@@ -90,13 +90,56 @@ export ANTHROPIC_API_KEY=sk-ant-...
 python3 agentix/app.py
 ```
 
+An **org-level** key is not tied to a workspace, and the API rejects it
+with a 400 asking for a workspace. Either use a workspace-scoped key, or
+name one:
+
+```bash
+export ANTHROPIC_WORKSPACE_ID=wrkspc_...
+```
+
+That goes out as the `anthropic-workspace-id` header on every request,
+and is only attached when set. `/api/health` reports which is in play.
+
+Note the failure lands late: a key being *present* is all `build_agent`
+checks, so startup looks healthy and the 400 arrives on the first chat.
+
+## Running at boot
+
+```bash
+cd ~/crabora/software/agentix && ./install_service.sh
+```
+
+Installs `crabora-agentix.service`, enables it at boot and starts it.
+Re-runnable. It resolves this machine's paths and interpreter rather
+than hardcoding them, checks `flask` is importable for that interpreter,
+offers to add you to `dialout` (without which the bus comes up
+unavailable while the UI looks fine), and prompts for the credentials.
+
+**Credentials live in `/etc/crabora/agentix.env`**, root-owned and 0600,
+outside the repo — a key inside a working tree is one `git add -A` away
+from being published. The unit references it with a leading `-`, so a
+missing file is not a startup failure: the UI and all tools still work,
+only chat is disabled.
+
+```
+logs      sudo journalctl -u crabora-agentix -f
+restart   sudo systemctl restart crabora-agentix
+disable   sudo systemctl disable --now crabora-agentix
+```
+
+**Stop the service before running a gait program by hand.** Both want
+the same serial ports and the loser gets a confusing permission error.
+
 Tool failures are handed back to the model as observations rather than
 raised — it can usually recover, and "leg 3 isn't answering" is a better
 answer than a 500.
 
 ## Still to do
 
-- nginx config for serving `web/` and proxying `/api`.
+- nginx config for serving `web/` and proxying `/api`. The unit
+  currently binds 0.0.0.0:5000 directly; nginx should take 80 and
+  proxy, at which point the bind can move to 127.0.0.1.
 - Motion tools, in blast-radius order, with constrained schemas.
 - The live model path is **untested** — there were no Anthropic
   credentials on the machine it was written on. Tool wiring, schemas and
