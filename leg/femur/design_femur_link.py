@@ -34,6 +34,7 @@ Usage:
 
 import os
 import numpy as np
+import shapely.geometry
 import trimesh
 from trimesh import creation
 
@@ -115,6 +116,33 @@ CABLE_SLOT_H          = 14.0    # Y span of slot (cable connector width)
 # stronger per gram for a leg link that absorbs landing shocks. The
 # code is kept (just gated on N_TRUSS>0) in case a future, well-radiused
 # truss is worth reintroducing.
+# --- spine (2026-10-11) ----------------------------------------------
+# The tibia was snapping laterally at its knee until it got a rib; the
+# femur is the same construction -- a flat 5 mm plate -- with a LONGER
+# moment arm, since the load acts at the foot through the whole leg. So
+# it is the next thing to break, and gets the same treatment.
+#
+# Flat 24 x 5 beam              Z = 100 mm^3   1.0x
+# + 5 x 12 mm rib (T-section)   Z = 331 mm^3   3.3x  for +50% material
+#
+# Runs nearly the whole beam: the moment peaks at the HIP end (the
+# cantilever root), so the rib ramps up fast out of the disc and only
+# tapers where it meets the knee plate.
+SPINE_ENABLED   = True
+SPINE_WIDTH     = 5.0
+SPINE_HEIGHT    = 12.0
+SPINE_X_START   = 18.0    # just past the Phi32 hip disc (R=16)
+SPINE_X_FULL    = 26.0    # full height by here -- ramped, not stepped
+SPINE_X_TAPER   = 52.0
+SPINE_X_END     = 61.0    # MUST stop at the knee plate inner edge (61.4).
+                          # The plate is centred 12.5 mm INBOARD of the
+                          # tibia axis, not outboard, so it starts far
+                          # earlier than it looks -- and the cable slot
+                          # lives inside it. A rib running past here
+                          # bridges straight over that slot and blocks
+                          # the cable route.
+SPINE_SIDE      = +1.0    # +Z face
+
 N_TRUSS               = 0      # alternating triangles in the beam (0 = solid)
 TRUSS_MARGIN          = 2.0    # min wall between cell edge and next cell
 TRUSS_CHORD_MARGIN    = 2.5    # min wall between cell apex/base and beam edge
@@ -266,6 +294,23 @@ def build_link():
 
     positives = [hip_disc, beam, knee_end]
 
+    # Spine: a rib down the beam, turning its section into a T. See the
+    # note in PARAMETERS. Swept as one profile so the ramps are smooth --
+    # a stepped rib would line the beam with its own stress risers.
+    if SPINE_ENABLED:
+        from trimesh import transformations as tf
+        profile = shapely.geometry.Polygon([
+            (SPINE_X_START, 0.0),
+            (SPINE_X_FULL, SPINE_HEIGHT),
+            (SPINE_X_TAPER, SPINE_HEIGHT),
+            (SPINE_X_END, 0.0),
+        ])
+        spine = creation.extrude_polygon(profile, SPINE_WIDTH)
+        spine.apply_transform(tf.rotation_matrix(np.pi / 2, [1, 0, 0]))
+        spine.apply_translation([0.0, SPINE_WIDTH / 2.0,
+                                 SPINE_SIDE * LINK_THK / 2.0])
+        positives.append(spine)
+
     # Fillets at the two beam->plate inside corners (active knee only;
     # passive knee is a round disc and has no sharp corner to fillet).
     if KNEE_MODE == "active" and KNEE_FILLET_R > 0:
@@ -416,7 +461,7 @@ def render_png(link, path):
 # =============================================================
 def main():
     os.makedirs(OUT_DIR, exist_ok=True)
-    print(f"Building femur link v1 ({KNEE_MODE} knee)...")
+    print(f"Building femur link v2 ({KNEE_MODE} knee)...")
     link = build_link()
     e = link.extents
     vol = link.volume / 1000.0
@@ -427,6 +472,12 @@ def main():
                     else "no chamfer")
     print(f"  beam        : {BEAM_WIDTH:.0f} wide x {LINK_THK:.0f} thick mm,  "
           f"{N_TRUSS} truss cells,  {chamfer_note}")
+    if SPINE_ENABLED:
+        print(f"  spine       : {SPINE_WIDTH:.0f} x {SPINE_HEIGHT:.0f} mm rib on "
+              f"the {'+' if SPINE_SIDE > 0 else '-'}Z face, X="
+              f"{SPINE_X_START:.0f}..{SPINE_X_END:.0f} "
+              f"(full {SPINE_X_FULL:.0f}..{SPINE_X_TAPER:.0f})  "
+              f"-> ~3.3x lateral strength, stops clear of the cable slot")
     print(f"  hip         : Φ{HIP_DISC_DIA:.0f} disc, 4 M3 horn bolts on "
           f"{HORN_BOLT_SQUARE:.0f} mm square + Φ{HORN_CENTRAL_CLEAR:.0f} central relief")
     if KNEE_MODE == "passive":
