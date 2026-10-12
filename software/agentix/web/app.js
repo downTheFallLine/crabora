@@ -291,6 +291,10 @@ $("stop").addEventListener("click", async () => {
   // anything that could be slow.
   const btn = $("stop");
   btn.disabled = true;
+  // Stop talking and stop listening: an emergency stop should not be
+  // competing with a voice reading out the previous answer.
+  if (canSpeak) window.speechSynthesis.cancel();
+  if (listening && recog) recog.stop();
   sayText("you", "me", "STOP");
   try {
     const res = await fetch("/api/stop", { method: "POST" });
@@ -305,6 +309,119 @@ $("stop").addEventListener("click", async () => {
     refreshLights();
   }
 });
+
+
+/* ---------------- voice ----------------
+ * Tap Talk, speak, and the transcript is sent as if typed. Voice reads
+ * replies back.
+ *
+ * SECURE CONTEXT: speech recognition needs https or localhost. Served
+ * over plain http from the Pi's LAN address, the browser refuses the
+ * microphone outright -- so detect that up front and say so, rather than
+ * letting the first tap fail with a bare "not-allowed". An SSH tunnel
+ * (localhost) is the easy way round it, and it happens to be a secure
+ * context for free.
+ *
+ * Speech SYNTHESIS has no such requirement, so Voice works either way.
+ */
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+const canHear = !!SR && window.isSecureContext;
+const canSpeak = "speechSynthesis" in window;
+
+let recog = null, listening = false, speakReplies = false;
+
+function micState(state, label) {
+  const b = $("mic");
+  b.classList.toggle("listening", state === "listening");
+  $("mic-label").textContent = label;
+}
+
+if (!SR) {
+  $("mic").disabled = true;
+  micState("", "No mic");
+  $("mic").title = "This browser has no speech recognition (Chrome does)";
+} else if (!window.isSecureContext) {
+  $("mic").disabled = true;
+  micState("", "Mic blocked");
+  $("mic").title =
+    "The microphone needs https or localhost. Reach this page over an " +
+    "SSH tunnel (http://localhost:5050) and the button works.";
+}
+
+function startListening() {
+  recog = new SR();
+  recog.lang = "en-US";
+  recog.interimResults = true;
+  recog.continuous = false;          // stops on its own at a pause
+  recog.maxAlternatives = 1;
+
+  const input = $("prompt");
+  let finalText = "";
+
+  recog.onstart = () => { listening = true; micState("listening", "Listening"); };
+
+  recog.onresult = (ev) => {
+    let interim = "";
+    for (let i = ev.resultIndex; i < ev.results.length; i++) {
+      const r = ev.results[i];
+      if (r.isFinal) finalText += r[0].transcript;
+      else interim += r[0].transcript;
+    }
+    input.value = (finalText + interim).trim();
+  };
+
+  recog.onerror = (ev) => {
+    const why = {
+      "not-allowed": "Microphone permission was refused. Allow it in the " +
+                     "address bar, then try again.",
+      "service-not-allowed": "The browser blocked speech recognition. This " +
+                     "usually means the page is not on https or localhost.",
+      "no-speech": "I did not hear anything.",
+      "audio-capture": "No microphone was found.",
+      "network": "Speech recognition could not reach its network service.",
+    }[ev.error] || `Speech recognition failed: ${ev.error}`;
+    sayText("crabora", "bot bad", why);
+  };
+
+  recog.onend = () => {
+    listening = false;
+    micState("", "Talk");
+    const text = input.value.trim();
+    // Send it the same way typing would, so there is one path into chat.
+    if (text) $("composer").dispatchEvent(new Event("submit", {cancelable: true}));
+  };
+
+  try { recog.start(); }
+  catch { listening = false; micState("", "Talk"); }
+}
+
+$("mic").addEventListener("click", () => {
+  if (listening) { recog && recog.stop(); return; }
+  if (canSpeak) window.speechSynthesis.cancel();   // do not talk over the user
+  startListening();
+});
+
+/* --- speaking --- */
+$("speak").addEventListener("click", () => {
+  if (!canSpeak) {
+    sayText("crabora", "bot bad", "This browser cannot speak.");
+    return;
+  }
+  speakReplies = !speakReplies;
+  $("speak").textContent = speakReplies ? "Voice on" : "Voice off";
+  $("speak").classList.toggle("on", speakReplies);
+  $("speak").setAttribute("aria-pressed", String(speakReplies));
+  if (!speakReplies) window.speechSynthesis.cancel();
+});
+
+function speak(text) {
+  if (!speakReplies || !canSpeak || !text) return;
+  window.speechSynthesis.cancel();
+  const u = new SpeechSynthesisUtterance(text);
+  u.rate = 1.0;
+  u.pitch = 0.9;          // a shade below default; it is a robot
+  window.speechSynthesis.speak(u);
+}
 
 /* ---------------- chat ---------------- */
 $("composer").addEventListener("submit", async (ev) => {
@@ -322,6 +439,7 @@ $("composer").addEventListener("submit", async (ev) => {
   try {
     const r = await api("/api/chat", { prompt: text });
     pending.remove();
+    speak(r.reply);
     say("crabora", "bot", (b) => {
       (r.reply || "").split(/\n{2,}/).forEach((p) =>
         b.appendChild(el("p", null, p)));

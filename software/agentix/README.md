@@ -192,3 +192,33 @@ Long motions poll `arbiter.stopping` between steps. STOP sets that flag
 lock would make STOP wait for it, which is the one thing it must never
 do. The motion drops out at its next step, then STOP takes the bus and
 releases torque.
+
+## Voice
+
+**Talk** — tap it, speak, and the transcript is sent exactly as if you
+had typed it. It stops on its own at a pause. **Voice** reads replies
+aloud. STOP cancels both, because an emergency stop should not be
+competing with a voice finishing the previous answer.
+
+### The microphone needs a secure context
+
+Speech recognition is refused outside https or localhost. Served over
+plain http from the Pi's LAN address, `http://192.168.0.131:5000`, the
+browser blocks the microphone and the button shows **Mic blocked** with
+the reason — the failure is detected up front rather than surfacing as a
+bare `not-allowed` on first tap.
+
+The easy way round is an SSH tunnel, because **localhost counts as a
+secure context**:
+
+```bash
+ssh -N -L 5050:localhost:5000 ubuntu@<pi>
+```
+
+Then open `http://localhost:5050/`. Use 5050 rather than 5000: AirPlay
+Receiver owns 5000 on macOS. This also sidesteps the macOS Local Network
+privacy permission, which Chrome needs to reach a LAN address at all.
+
+Reading replies aloud has no such requirement and works either way.
+Recognition is Chrome-only (`webkitSpeechRecognition`); other browsers
+get a disabled button saying so, and everything else keeps working.

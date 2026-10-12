@@ -38,6 +38,16 @@
     <button class="btn move" data-motion="stand_up" disabled>Stand Up</button>
     <button class="btn move" data-motion="lay_down" disabled>Lay Down</button>
     <button class="btn stop" id="stop">STOP</button>
+
+    <!-- Voice. Speech recognition needs a SECURE CONTEXT: https, or
+         localhost. Served over plain http from the Pi's LAN address it
+         is blocked by the browser, so the button says why. -->
+    <span class="sep" aria-hidden="true"></span>
+    <button class="btn mic" id="mic" title="Hold a conversation">
+      <span class="dot" aria-hidden="true"></span><span id="mic-label">Talk</span>
+    </button>
+    <button class="btn voice" id="speak" title="Read replies aloud"
+            aria-pressed="false">Voice off</button>
   </div>
 </header>
 
