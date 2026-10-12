@@ -122,6 +122,14 @@ class StandArgs(BaseModel):
         default=80.0, description="deck clearance in mm, 40-160")
 
 
+class WalkArgs(BaseModel):
+    distance: float = Field(
+        default=200.0, description="how far to travel in mm, 20-1000")
+    direction: str = Field(
+        default="forward",
+        description="'forward', 'backward', 'left' or 'right'")
+
+
 class TurnArgs(BaseModel):
     degrees: int = Field(
         description="clockwise turn: exactly 90, 180, 270 or 360")
@@ -137,6 +145,7 @@ _SCHEMAS = {
     "lay_down":     LegsArgs,
     "nudge_joint":  NudgeArgs,
     "stand_up":     StandArgs,
+    "walk":         WalkArgs,
     "turn":         TurnArgs,
     "dance":        DanceArgs,
 }

@@ -449,12 +449,71 @@ def dance(arbiter, safety, seconds: float = 10.0):
     })
 
 
+
+HEADINGS = {"forward": 0.0, "backward": 180.0, "left": 90.0, "right": 270.0}
+WALK_MIN_MM, WALK_MAX_MM = 20.0, 1000.0
+
+
+def walk(arbiter, safety, distance: float = 200.0, direction: str = "forward"):
+    """Walk in a straight line, via walk.py's planted-foot gait.
+
+    The robot must already be standing. A hexagon with radial legs has no
+    mechanical front, so it walks sideways and backwards without turning
+    first -- the heading is just a vector into the same maths.
+    """
+    try:
+        distance = float(distance)
+    except (TypeError, ValueError):
+        raise Unsafe(f"distance must be a number, got {distance!r}")
+    if not WALK_MIN_MM <= distance <= WALK_MAX_MM:
+        raise Unsafe(f"walk distance must be {WALK_MIN_MM:g}-{WALK_MAX_MM:g} "
+                     f"mm, got {distance:g}")
+    heading = HEADINGS.get(str(direction).lower())
+    if heading is None:
+        raise Unsafe(f"direction must be one of "
+                     f"{', '.join(sorted(HEADINGS))}; got {direction!r}")
+
+    _gate(arbiter, safety)
+    import walk as prog                              # noqa: PLC0415
+    from pose import Unreachable                     # noqa: PLC0415
+
+    try:
+        p = prog.plan(distance, prog.DEFAULT_STRIDE, prog.DEFAULT_HEIGHT,
+                      120.0, prog.DEFAULT_COXA_LIMIT, heading,
+                      sorted(ALL_LEGS))
+    except Unreachable as e:
+        raise Unsafe(f"cannot walk {distance:g} mm {direction}: {e}")
+
+    with arbiter.session(f"walk {distance:g}mm {direction}") as s:
+        legs = _usable_legs(s, sorted(ALL_LEGS))
+        if len(legs) < 6:
+            raise Unsafe(f"walking needs all six legs; {sorted(legs)} answered")
+        outcome = prog.run_walk(
+            s.packet, s.joints(), legs, _limits(s, legs), p["base"],
+            half=p["half"], per_step=p["per_step"], n_steps=p["n_steps"],
+            height=prog.DEFAULT_HEIGHT, r_foot=p["r_foot"], heading=heading,
+            lift=prog.DEFAULT_LIFT, speed=prog.DEFAULT_SPEED, substeps=5,
+            should_cancel=lambda: arbiter.stopping,
+            log=lambda *a, **k: None)
+
+    return _done(safety, {
+        "action": "walk", "direction": direction,
+        "asked_mm": round(distance), "travelled_mm": round(outcome["travelled"]),
+        "steps_done": outcome["steps_done"], "cancelled": outcome["cancelled"],
+        "legs_short_on": {str(k): sorted(v)
+                          for k, v in outcome["trouble"].items()} or None,
+        "note": ("commanded distance -- feet were held planted, so any "
+                 "shortfall on the floor is real slip, not scrub"),
+    })
+
+
 MOTION_TOOLS = {
     "relax": relax,
     "nudge_joint": nudge,
     "lay_down": lay_down,
     "sit": sit,
     "stand_up": stand,
+    "walk": walk,
     "turn": turn,
     "dance": dance,
 }
@@ -484,6 +543,12 @@ MOTION_HELP = {
         "recovery: collapse, untangle leg by leg, then stand. Optional "
         "height, 40-160 mm of deck clearance, default 80. Takes tens of "
         "seconds and is the highest-current thing the robot does."),
+    "walk": (
+        "Walk in a straight line. distance in mm (20-1000, default 200), "
+        "direction 'forward'|'backward'|'left'|'right'. The robot must "
+        "already be standing. It walks sideways and backwards without "
+        "turning first -- a hexagon with radial legs has no mechanical "
+        "front. Feet are held planted, so a shortfall is real slip."),
     "turn": (
         "Turn clockwise in place by 90, 180, 270 or 360 degrees. The "
         "robot must already be standing. Always clockwise -- there is no "

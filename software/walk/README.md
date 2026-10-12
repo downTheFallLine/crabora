@@ -293,3 +293,44 @@ but will not stand the robot). Build up a tier at a time:
 2. Add femurs → `software/utils/swing_legs.py --mode by-joint`
 3. Add tibias → same, then static stance
 4. Standing, then walking — needs the power path sorted first
+
+## walk.py
+
+Translates the body across the floor with the feet planted. **The idea is
+`turn.py`'s, with translation substituted for rotation** — both are "foot
+fixed in the world, re-solve the leg", and the only difference is what the
+body does between solves:
+
+| | the planted foot appears to |
+|---|---|
+| turn | rotate about the body centre |
+| walk | translate, opposite the heading |
+
+That discipline is the whole point. Swinging the coxa and hoping is what
+lost two thirds of the first turn: the foot slid radially, and a foot
+sliding radially has no grip to push with either.
+
+A hexagon with radial legs has no mechanical front, so it walks sideways
+and backwards without turning first — heading is just a vector. 0 is
+forward (the point between legs 1 and 6), 90 left, 180 back, 270 right.
+
+```bash
+python3 walk.py 300 --dry-run        # geometry only, touches nothing
+python3 walk.py 300                  # 300 mm forward
+python3 walk.py 200 --heading 180    # backwards
+python3 walk.py 400 --stride 150     # longer steps, fewer of them
+```
+
+`--dry-run` prints the per-leg coxa angles at both sweep extremes, which
+is where the asymmetry shows: walking forward, the **beam legs (2 and 5)
+sweep most** (±8.0° at a 25 mm half-stride) because they are
+perpendicular to travel, so their motion is almost pure tangent. The
+corner legs take ±4.6°, since part of their motion is radial — a reach
+change rather than a coxa swing. Which legs have the hard job depends on
+the heading, so the stride cap is computed per leg.
+
+**Verified in simulation, not on hardware.** Foot drift through a full
+sweep is 0.000000 mm on forward, backward, left, right and diagonal
+headings — the same check `turn.py` had to pass. Stride is capped by
+whichever comes first, leg reach or the coxa limit: ±84 mm forward, ±77 mm
+sideways at 80 mm height. None of that is the same as having walked.

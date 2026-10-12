@@ -1,0 +1,443 @@
+#!/usr/bin/env python3
+"""
+walk -- translate the body across the floor, feet planted.
+
+THE IDEA IS TURN.PY'S, WITH TRANSLATION IN PLACE OF ROTATION.
+
+turn.py established the thing that matters: a stance foot must stay on
+the same patch of floor while the body moves. Swinging the coxa and
+hoping is what lost two thirds of the first turn -- the foot slid
+radially, and a foot that is sliding radially has no grip to push with
+either. Measured: 90 degrees commanded gave 30-45.
+
+So the same discipline here. At every interpolated point the stance legs
+are re-solved from where their feet already are, and the body is what
+moves. The only change is what the body does between solves:
+
+    turn:  the foot appears to rotate about the body centre
+    walk:  the foot appears to translate, opposite the heading
+
+Both are "foot fixed in the world, re-solve the leg". The code below is
+deliberately the same shape as turn.py's so the two read alike.
+
+A hexagonal robot with radial legs has no front in the mechanical sense,
+so this walks in any direction without turning first -- heading is just
+a vector. Forward (the hexagon point between legs 1 and 6) is 0.
+
+NOT YET RUN ON HARDWARE. The geometry is checked in --dry-run, which
+reports reach and coxa angle at the extremes and refuses a stride the
+legs cannot hold. That is not the same as having walked.
+
+Usage:
+  python3 walk.py 300 --dry-run        # 300 mm forward, geometry only
+  python3 walk.py 300                  # 300 mm forward
+  python3 walk.py 200 --heading 180    # backwards
+  python3 walk.py 200 --heading 90     # sideways, left
+  python3 walk.py 300 --stride 40 --height 90
+
+Requires: pip install feetech-servo-sdk   (provides the scservo_sdk module)
+"""
+
+import argparse
+import math
+import os
+import sys
+
+_HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, _HERE)
+sys.path.insert(0, os.path.join(os.path.dirname(_HERE), "stand"))
+
+from gait_lib import (  # noqa: E402
+    ALL_LEGS, BODY_TO_COXA_AXIS, COXA_JOINT_DIGIT, COXA_RADIAL,
+    COXA_VERTICAL, FEMUR_JOINT_DIGIT, LEG_BEARING, LEG_NAME,
+    TIBIA_JOINT_DIGIT, TRIPOD_A, TRIPOD_B,
+    ADDR_GOAL_SPEED, ADDR_MAX_ANGLE, ADDR_MIN_ANGLE, ADDR_TORQUE_ENABLE,
+    BusError, PacketHandler,
+    confirm, find_joints, find_urt_devices, open_ports, read2,
+    write1, write2,
+)
+from pose import (  # noqa: E402
+    Unreachable, leg_fk, leg_ik, pose_stand, stand_height_range,
+)
+from stand import LOADED_TOLERANCE, clamp, move_group, pose_counts  # noqa: E402
+
+DEFAULT_STRIDE = 50.0    # mm of body travel per step. Bigger covers
+                         # ground faster and reaches further out, which
+                         # loads the femur harder at the extremes.
+DEFAULT_HEIGHT = 80.0
+DEFAULT_SPEED = 300
+DEFAULT_LIFT = 25.0      # femur degrees added to lift the swing tripod
+DEFAULT_SUBSTEPS = 5
+DEFAULT_COXA_LIMIT = 50.0
+
+JOINTS = ((COXA_JOINT_DIGIT, "coxa"),
+          (FEMUR_JOINT_DIGIT, "femur"),
+          (TIBIA_JOINT_DIGIT, "tibia"))
+
+
+# =============================================================
+# WALK GEOMETRY
+# =============================================================
+def planted_radius(base):
+    """Distance from the BODY CENTRE to a planted foot, legs neutral."""
+    out, _down = leg_fk(base["femur"], base["tibia"])
+    return BODY_TO_COXA_AXIS + COXA_RADIAL + out
+
+
+def stance_pose(leg, s, height, r_foot, heading=0.0):
+    """Pose holding this leg's foot planted while the body advances `s`.
+
+    `s` is how far the body has travelled (mm) along `heading` since the
+    foot was planted. The foot is fixed in the world, so in the body
+    frame it slides `s` the other way, and the leg has to reach to hold
+    it there.
+
+    Raises Unreachable if the leg cannot stretch that far.
+
+    Same approximation as turn.py: COXA_TANGENT (21 mm) is ignored. It
+    shifts the coxa angle by under 2 degrees at these reaches, well
+    inside the slip this is trying to eliminate.
+    """
+    phi = -math.radians(LEG_BEARING[leg])
+    psi = -math.radians(heading)      # body frame is +X fwd, +Y left;
+                                      # bearings run clockwise, hence -
+
+    # Foot where it was planted, in the body frame at s = 0 ...
+    fx = r_foot * math.cos(phi)
+    fy = r_foot * math.sin(phi)
+    # ... then the body moves along the heading, so the foot appears to
+    # move the opposite way by the same amount. This is the whole
+    # difference from turn.py.
+    fx -= s * math.cos(psi)
+    fy -= s * math.sin(psi)
+
+    cx = BODY_TO_COXA_AXIS * math.cos(phi)
+    cy = BODY_TO_COXA_AXIS * math.sin(phi)
+    vx, vy = fx - cx, fy - cy
+    reach = math.hypot(vx, vy)
+    coxa = math.degrees(math.atan2(vy, vx) - phi)
+    femur, tibia = leg_ik(out=reach - COXA_RADIAL,
+                          down=height + COXA_VERTICAL)
+    return {"coxa": coxa, "femur": femur, "tibia": tibia}
+
+
+def _normalise(deg):
+    """Wrap to (-180, 180] so a coxa angle reads sensibly."""
+    return (deg + 180.0) % 360.0 - 180.0
+
+
+def max_half_stride(height, r_foot, coxa_limit, heading=0.0,
+                    legs=ALL_LEGS, limit=200.0):
+    """Largest half-stride (mm) every leg can hold at both extremes.
+
+    Found by stepping outward until some leg either runs out of reach or
+    needs more coxa than allowed. Done per leg because a heading that is
+    easy for the beam legs can be hard for the corner ones -- walking
+    sideways is not the same problem as walking forward.
+    """
+    best = 0.0
+    step = 1.0
+    s = step
+    while s <= limit:
+        for leg in legs:
+            for sign in (-1.0, +1.0):
+                try:
+                    p = stance_pose(leg, sign * s, height, r_foot, heading)
+                except Unreachable:
+                    return best
+                if abs(_normalise(p["coxa"])) > coxa_limit:
+                    return best
+        best = s
+        s += step
+    return best
+
+
+def plan(distance, stride, height, foot_out, coxa_limit, heading, legs):
+    """Work out the step schedule, or say why it cannot be done."""
+    base = pose_stand(height, foot_out)
+    r_foot = planted_radius(base)
+    cap = max_half_stride(height, r_foot, coxa_limit, heading, legs)
+    if cap <= 0:
+        raise Unreachable(
+            f"no usable stride at {height:g} mm with the feet "
+            f"{r_foot:.0f} mm out -- the legs cannot hold a planted foot "
+            f"through any body movement on heading {heading:g}")
+
+    per_step_max = min(stride, 2 * cap)
+    n_steps = max(1, math.ceil(distance / per_step_max))
+    per_step = distance / n_steps
+    half = per_step / 2.0
+    if half > cap:
+        raise Unreachable(f"half-stride {half:.0f} mm exceeds the "
+                          f"{cap:.0f} mm the legs can hold")
+    return {"base": base, "r_foot": r_foot, "cap": cap, "n_steps": n_steps,
+            "per_step": per_step, "half": half}
+
+
+# =============================================================
+# THE WALK
+# =============================================================
+def run_walk(packet, joints, legs, limits, base, *, half, per_step, n_steps,
+             height, r_foot, heading, lift, speed, substeps,
+             should_cancel=None, log=print):
+    """Setup, alternating tripods, then back to a neutral stance.
+
+    Structured exactly like turn.run_turn, including the cancellation
+    poll: a walk is many seconds long, and without it a stop request
+    would have to wait for the whole thing.
+
+    Returns {"travelled", "steps_done", "trouble", "cancelled"}.
+    """
+    for dg, _ in JOINTS:
+        for leg in legs:
+            sid, port = joints[dg][leg]
+            write2(packet, port, sid, ADDR_GOAL_SPEED, speed, "speed")
+            write1(packet, port, sid, ADDR_TORQUE_ENABLE, 1, "torque on")
+
+    def send(frame):
+        group, targets = {}, {}
+        for leg, pose in frame.items():
+            counts = pose_counts(pose)
+            for dg, _ in JOINTS:
+                group[(leg, dg)] = joints[dg][leg]
+                targets[(leg, dg)] = clamp(counts[dg], limits[(leg, dg)])
+        results = move_group(packet, group, targets, LOADED_TOLERANCE)
+        return [k for k, (p, to) in results.items()
+                if to or abs(p - targets[k]) > LOADED_TOLERANCE]
+
+    # Every leg starts holding its foot with the body pre-shifted back by
+    # half a step, so the first sweep is a full one.
+    log("\n  -> set up")
+    start = {l: stance_pose(l, -half, height, r_foot, heading) for l in legs}
+    send(start)
+
+    trouble = {}
+    travelled = 0.0
+    for i in range(1, n_steps + 1):
+        if should_cancel is not None and should_cancel():
+            return {"travelled": travelled, "steps_done": i - 1,
+                    "trouble": trouble, "cancelled": True}
+        stance = TRIPOD_B if i % 2 else TRIPOD_A
+        swing = TRIPOD_A if i % 2 else TRIPOD_B
+        log(f"  step {i}/{n_steps} (stance {'B' if i % 2 else 'A'}):",
+            end="", flush=True)
+
+        # LIFT: femur only. Moving a coxa here would drag a foot that is
+        # still on the floor and pull the body back.
+        frame = {l: (dict(start[l], femur=start[l]["femur"] + lift)
+                     if l in swing else dict(start[l]))
+                 for l in legs}
+        for k in send(frame):
+            trouble.setdefault(k[0], set()).add("lift")
+        log(" lift", end="", flush=True)
+
+        # SWEEP: walk the body along in interpolated points. At each one
+        # the stance legs are re-solved to hold their feet on the SAME
+        # patch of floor -- that is the point, and why there is no scrub.
+        reset = {l: stance_pose(l, -half, height, r_foot, heading)
+                 for l in swing}
+        for j in range(1, substeps + 1):
+            frac = j / substeps
+            s = -half + (2 * half) * frac
+            frame = {}
+            for l in legs:
+                if l in stance:
+                    frame[l] = stance_pose(l, s, height, r_foot, heading)
+                else:
+                    a, b = start[l], reset[l]
+                    frame[l] = {k: a[k] + (b[k] - a[k]) * frac
+                                for k in ("coxa", "femur", "tibia")}
+                    frame[l]["femur"] += lift
+            for k in send(frame):
+                trouble.setdefault(k[0], set()).add("sweep")
+        log(" sweep", end="", flush=True)
+
+        # PLANT: femur down, everything else held.
+        landed = {l: (stance_pose(l, +half, height, r_foot, heading)
+                      if l in stance else reset[l])
+                  for l in legs}
+        for k in send(landed):
+            trouble.setdefault(k[0], set()).add("plant")
+        travelled += per_step
+        log(f" plant   ({travelled:.0f} mm of {per_step * n_steps:.0f})")
+
+        start = landed
+
+    log("\n  -> back to neutral stance")
+    send({l: base for l in legs})
+    return {"travelled": travelled, "steps_done": n_steps,
+            "trouble": trouble, "cancelled": False}
+
+
+# =============================================================
+# MAIN
+# =============================================================
+def main():
+    ap = argparse.ArgumentParser(
+        description="Walk the robot in a straight line, feet planted.")
+    ap.add_argument("distance", type=float,
+                    help="how far to travel, in mm")
+    ap.add_argument("--heading", type=float, default=0.0,
+                    help="direction in degrees: 0 forward, 180 back, "
+                         "90 left, 270 right (default 0)")
+    ap.add_argument("--stride", type=float, default=DEFAULT_STRIDE,
+                    help=f"mm of body travel per step "
+                         f"(default {DEFAULT_STRIDE:g})")
+    ap.add_argument("--height", type=float, default=DEFAULT_HEIGHT,
+                    help=f"deck clearance in mm (default {DEFAULT_HEIGHT:g})")
+    ap.add_argument("--foot-out", type=float, default=120.0,
+                    help="how far outboard the feet are planted (mm)")
+    ap.add_argument("--lift", type=float, default=DEFAULT_LIFT,
+                    help=f"femur degrees to lift the swing tripod "
+                         f"(default {DEFAULT_LIFT:g})")
+    ap.add_argument("--substeps", type=int, default=DEFAULT_SUBSTEPS,
+                    help="interpolated points per sweep")
+    ap.add_argument("--coxa-limit", type=float, default=DEFAULT_COXA_LIMIT,
+                    help="largest coxa angle to use, degrees")
+    ap.add_argument("--speed", type=int, default=DEFAULT_SPEED)
+    ap.add_argument("--legs", type=int, nargs="+", default=list(ALL_LEGS))
+    ap.add_argument("--no-pause", dest="pause", action="store_false",
+                    help="do not ask before moving")
+    ap.add_argument("--dry-run", action="store_true",
+                    help="print the plan and the geometry, touch nothing")
+    ap.add_argument("--ports", nargs="+")
+    args = ap.parse_args()
+
+    legs = sorted(set(args.legs))
+    if any(l not in ALL_LEGS for l in legs):
+        ap.error("legs must be 1-6")
+    if args.distance <= 0:
+        ap.error("distance must be positive")
+    if not 0 < args.stride <= 150:
+        ap.error("--stride must be 0-150 mm")
+    if not 0 <= args.lift <= 60:
+        ap.error("--lift must be 0-60 degrees")
+    if not 1 <= args.speed <= 3400:
+        ap.error("--speed must be 1-3400 steps/s")
+    if args.substeps < 1:
+        ap.error("--substeps must be at least 1")
+
+    try:
+        p = plan(args.distance, args.stride, args.height, args.foot_out,
+                 args.coxa_limit, args.heading, legs)
+    except Unreachable as e:
+        print(f"Cannot walk like that: {e}")
+        try:
+            lo, hi = stand_height_range(args.foot_out)
+            print(f"  Reachable stand heights at foot_out "
+                  f"{args.foot_out:g}: {lo:.0f}..{hi:.0f} mm")
+        except Unreachable:
+            pass
+        return 1
+
+    name = {0: "FORWARD", 180: "BACKWARD",
+            90: "LEFT", 270: "RIGHT"}.get(args.heading % 360,
+                                          f"on heading {args.heading:g}°")
+    print(f"CRABORA walk -- {args.distance:g} mm {name}")
+    print(f"  standing at {args.height:g} mm; feet planted "
+          f"{p['r_foot']:.0f} mm from the body centre")
+    print(f"  {p['n_steps']} step(s) x {p['per_step']:.0f} mm = "
+          f"{args.distance:g} mm")
+    print(f"  each sweep moves the body +/-{p['half']:.0f} mm about the "
+          f"planted feet, in {args.substeps} interpolated points")
+    print(f"  the legs can hold +/-{p['cap']:.0f} mm on this heading "
+          f"(coxa limit +/-{args.coxa_limit:g}°)")
+    print(f"  feet are held PLANTED throughout -- no scrub, so no forced "
+          f"slip\n")
+
+    # Per-leg extremes: the corner legs and the beam legs do very
+    # different work, and which is worst depends on the heading.
+    print(f"  {'leg':>4} {'name':<12} {'coxa at -half':>14} "
+          f"{'coxa at +half':>14} {'worst':>8}")
+    worst = 0.0
+    for leg in legs:
+        lo = stance_pose(leg, -p["half"], args.height, p["r_foot"],
+                         args.heading)
+        hi = stance_pose(leg, +p["half"], args.height, p["r_foot"],
+                         args.heading)
+        span = max(abs(_normalise(lo["coxa"])), abs(_normalise(hi["coxa"])))
+        worst = max(worst, span)
+        print(f"  {leg:>4} {LEG_NAME[leg]:<12} "
+              f"{_normalise(lo['coxa']):>+13.1f}° "
+              f"{_normalise(hi['coxa']):>+13.1f}° {span:>7.1f}°")
+    print(f"\n  worst coxa angle {worst:.1f}° of {args.coxa_limit:g}° "
+          f"allowed")
+
+    if args.dry_run:
+        print("\n  Dry run -- nothing was sent to the bus.")
+        return 0
+
+    devices = args.ports or find_urt_devices()
+    if not devices:
+        print("No FE-URT-2 boards found.")
+        return 1
+    ports = open_ports(devices)
+    if not ports:
+        print("No URT could be opened.")
+        return 1
+
+    packet = PacketHandler(0)  # STS servos use protocol_end=0
+    try:
+        joints = {dg: find_joints(packet, ports, legs, dg, quiet=True)
+                  for dg, _ in JOINTS}
+        legs = [l for l in legs if all(l in joints[dg] for dg, _ in JOINTS)]
+        if not legs:
+            print("No leg has all three joints answering.")
+            return 1
+        in_a = [l for l in legs if l in TRIPOD_A]
+        in_b = [l for l in legs if l in TRIPOD_B]
+        print(f"  tripod A: {in_a}   tripod B: {in_b}")
+        if not in_a or not in_b:
+            print("  ⚠ one tripod is empty -- it cannot alternate, so it "
+                  "cannot walk. Stopping.")
+            return 1
+
+        limits = {}
+        for leg in legs:
+            for dg, _ in JOINTS:
+                sid, port = joints[dg][leg]
+                limits[(leg, dg)] = (
+                    read2(packet, port, sid, ADDR_MIN_ANGLE, "min"),
+                    read2(packet, port, sid, ADDR_MAX_ANGLE, "max"))
+
+        if args.pause and not confirm(
+                f"Standing, clear of obstacles, and ready to walk "
+                f"{args.distance:g} mm {name.lower()}?"):
+            print("\n  Stopped.")
+            return 1
+
+        outcome = run_walk(
+            packet, joints, legs, limits, p["base"],
+            half=p["half"], per_step=p["per_step"], n_steps=p["n_steps"],
+            height=args.height, r_foot=p["r_foot"], heading=args.heading,
+            lift=args.lift, speed=args.speed, substeps=args.substeps)
+
+        if outcome["trouble"]:
+            print()
+            for leg in sorted(outcome["trouble"]):
+                print(f"  ⚠ leg {leg} ({LEG_NAME[leg]}): short on "
+                      f"{', '.join(sorted(outcome['trouble'][leg]))}")
+        print(f"\n  Commanded {outcome['travelled']:.0f} mm in "
+              f"{outcome['steps_done']} step(s).")
+        print(f"  Feet were held planted throughout, so any shortfall is "
+              f"real slip")
+        print(f"  rather than forced scrub. Measure it before reaching for "
+              f"a bigger stride.")
+        return 1 if outcome["trouble"] else 0
+
+    except KeyboardInterrupt:
+        # Torque stays ON deliberately: the body is up on six legs, and
+        # releasing here drops it. Stopping where it stands is the safer
+        # failure. Use utils/all_limp.py to let it down on purpose.
+        print("\n\n  Interrupted -- stopped where it stands, torque ON.")
+        return 130
+    except BusError as e:
+        print(f"\nBus error: {e}")
+        return 1
+    finally:
+        for port in ports.values():
+            port.closePort()
+
+
+if __name__ == "__main__":
+    sys.exit(main())

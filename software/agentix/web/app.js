@@ -64,6 +64,8 @@ function headline(d) {
                               : "Limp \u2014 it was not bearing weight";
     case "nudge":      return `${d.joint}: moved ${d.moved_deg}\u00b0` +
                               (d.clamped ? " (clamped by its travel limit)" : "");
+    case "walk":       return `Walked ${d.travelled_mm} mm ${d.direction}` +
+                              (d.cancelled ? " \u2014 stopped early" : "");
     case "turn":       return `Turned ${d.turned_deg}\u00b0 clockwise` +
                               (d.cancelled ? " \u2014 stopped early" : "");
     case "dance":      return `Danced ${d.seconds}s, ${d.frames} frames` +
@@ -82,6 +84,7 @@ const CONSUMED = {
   relax:    ["was_bearing_weight", "note", "legs"],
   nudge:    ["joint", "moved_deg", "clamped", "note"],
   turn:     ["turned_deg", "degrees", "clockwise", "cancelled"],
+  walk:     ["travelled_mm", "direction", "cancelled"],
   dance:    ["seconds", "frames", "cancelled"],
 };
 
