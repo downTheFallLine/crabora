@@ -11,7 +11,12 @@ Since we're working on a Bamboo A1 Mini printer, unibody is really a large hexag
 The following components bolt to the unibody:
 
 a.) Battery
-b.) BEC converter (Qty 2)
+b.) BEC converter (Qty 2) -- two different outputs, NOT a split load:
+       - 5 V   -> Raspberry Pi
+       - 7.4 V -> servo bus, via the URTs
+    So the servos are fed by ONE converter. Its current rating is the
+    ceiling for everything the legs do, and the Pi's draw does not come
+    out of that budget.
 c.) Raspberry Pi
 d.) URT (Qty 3)
 e.) Coxa servo w. cap (Qty 6)
