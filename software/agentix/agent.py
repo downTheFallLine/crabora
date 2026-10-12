@@ -42,6 +42,12 @@ EFFORT = "low"
 MAX_TOKENS = 4096
 MAX_STEPS = 6          # tool round trips before giving up
 
+# An org-level key is not tied to a workspace, so the API rejects it with
+# a 400 unless the request names one. A workspace-scoped key carries that
+# itself and needs nothing here. Set ANTHROPIC_WORKSPACE_ID to the
+# wrkspc_... id to use an org key.
+WORKSPACE_ID = os.environ.get("ANTHROPIC_WORKSPACE_ID")
+
 SYSTEM = """You are the voice of CRABORA, a six-legged walking robot.
 
 You can LOOK at the robot but not move it. If asked to move, turn, dance
@@ -104,6 +110,10 @@ class Agent:
             )
             for name, fn in sorted(READ_ONLY_TOOLS.items())
         ]
+        kwargs = {}
+        if WORKSPACE_ID:
+            kwargs["default_headers"] = {
+                "anthropic-workspace-id": WORKSPACE_ID}
         llm = ChatAnthropic(
             model=model,
             max_tokens=MAX_TOKENS,
@@ -111,6 +121,7 @@ class Agent:
             # budget_tokens is rejected. Effort is the only dial.
             thinking={"type": "adaptive"},
             output_config={"effort": effort},
+            **kwargs,
         )
         # tool_choice stays "auto" -- Opus 5.5 rejects forced any/tool.
         self.llm = llm.bind_tools(self._tools)
@@ -122,6 +133,7 @@ class Agent:
             "model": self.model_name,
             "tools": sorted(self._by_name),
             "phase": "read-only",
+            "workspace": WORKSPACE_ID or "(key-scoped)",
         }
 
     def ask(self, prompt):
