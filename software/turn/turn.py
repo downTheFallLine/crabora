@@ -59,17 +59,22 @@ sys.path.insert(0, os.path.join(os.path.dirname(_HERE), "stand"))
 
 from gait_lib import (  # noqa: E402
     ALL_LEGS, BODY_TO_COXA_AXIS, COXA_JOINT_DIGIT, COXA_RADIAL,
-    FEMUR_JOINT_DIGIT, LEG_NAME, TIBIA_JOINT_DIGIT, TRIPOD_A, TRIPOD_B,
+    COXA_VERTICAL, FEMUR_JOINT_DIGIT, LEG_BEARING, LEG_NAME,
+    TIBIA_JOINT_DIGIT, TRIPOD_A, TRIPOD_B,
     ADDR_GOAL_SPEED, ADDR_MAX_ANGLE, ADDR_MIN_ANGLE, ADDR_TORQUE_ENABLE,
     BusError, PacketHandler,
     confirm, find_joints, find_urt_devices, open_ports, read2, to_counts,
     write1, write2,
 )
-from pose import Unreachable, leg_fk, pose_stand, stand_height_range  # noqa: E402
+from pose import (  # noqa: E402
+    Unreachable, leg_fk, leg_ik, pose_stand, stand_height_range,
+)
 from stand import LOADED_TOLERANCE, clamp, move_group, pose_counts  # noqa: E402
 
 TURNS = (90, 180, 270, 360)
-DEFAULT_STEP = 18.0      # coxa degrees either side of centre, per step
+DEFAULT_STEP = 30.0      # BODY degrees per step; the legs can manage
+                         # more, but a bigger step reaches further
+                         # round and loads the femur harder
 DEFAULT_HEIGHT = 80.0
 DEFAULT_SPEED = 300
 DEFAULT_LIFT = 25.0      # femur degrees added to lift the swing tripod
@@ -82,57 +87,64 @@ JOINTS = ((COXA_JOINT_DIGIT, "coxa"),
 # =============================================================
 # TURN GEOMETRY
 # =============================================================
-def foot_radius(base):
-    """Horizontal distance from the coxa axis out to the planted foot."""
+def planted_radius(base):
+    """Distance from the BODY CENTRE to a planted foot, legs neutral."""
     out, _down = leg_fk(base["femur"], base["tibia"])
-    return COXA_RADIAL + out
+    return BODY_TO_COXA_AXIS + COXA_RADIAL + out
 
 
-def body_turn(coxa_deg, d):
-    """Body rotation produced by swinging a planted leg's coxa.
+def stance_pose(leg, rho, height, r_foot):
+    """Pose that keeps this leg's foot planted while the body rotates.
 
-    The hip is R from the body centre and the foot d beyond it; with the
-    foot fixed, the body swings through the angle subtended at the body
-    centre, not the angle at the hip.
+    `rho` is how far the body has turned (degrees clockwise) from the
+    point where the foot was planted. The foot is fixed in the world, so
+    in the rotating body frame it swings the other way; the leg has to
+    reach further around to hold it there.
+
+    This is what makes the turn work. Holding femur and tibia fixed and
+    swinging the coxa alone forces the foot to slide several millimetres
+    radially on every sweep -- and a foot that is sliding radially has
+    no tangential grip either, so most of the push is lost. Measured:
+    90 degrees commanded gave 30-45.
+
+    Raises Unreachable if the leg cannot stretch that far round.
+
+    Approximation: COXA_TANGENT (21 mm) is ignored here. It shifts the
+    coxa angle by under 2 degrees at these reaches, well inside the slip
+    this is trying to eliminate.
     """
-    a = math.radians(coxa_deg)
-    return math.degrees(math.atan2(d * math.sin(a),
-                                   BODY_TO_COXA_AXIS + d * math.cos(a)))
+    phi = -math.radians(LEG_BEARING[leg])
+    p = math.radians(rho)
+    # Foot fixed in the world => it appears to rotate the other way in
+    # the body frame.
+    fx = r_foot * math.cos(phi + p)
+    fy = r_foot * math.sin(phi + p)
+    cx = BODY_TO_COXA_AXIS * math.cos(phi)
+    cy = BODY_TO_COXA_AXIS * math.sin(phi)
+    vx, vy = fx - cx, fy - cy
+    reach = math.hypot(vx, vy)
+    coxa = math.degrees(math.atan2(vy, vx) - phi)
+    femur, tibia = leg_ik(out=reach - COXA_RADIAL,
+                          down=height + COXA_VERTICAL)
+    return {"coxa": coxa, "femur": femur, "tibia": tibia}
 
 
-def scrub(coxa_deg, d):
-    """How much a planted foot's radius changes over the sweep -- i.e.
-    how far it has to rub. Inherent to a coxa-only turn."""
-    a = math.radians(coxa_deg)
-    return abs(math.hypot(d * math.sin(a), BODY_TO_COXA_AXIS + d * math.cos(a))
-               - (BODY_TO_COXA_AXIS + d))
-
-
-def solve_step(target, max_step, d, efficiency=1.0):
-    """Pick the number of half-strides and the exact coxa angle so that
-    N whole steps land exactly on `target`.
-
-    Each step sweeps the stance coxas from -a to +a, turning the body by
-    2 * body_turn(a). Returns (n_steps, coxa_deg).
-
-    `efficiency` is how much of the geometric turn the robot actually
-    achieves. Planted feet scrub, and scrub is slip, so the real turn is
-    always short of the ideal. Measured at about 0.33 on a hard floor
-    before the lift/reset bug was fixed; measure your own and pass
-    --efficiency rather than trusting this.
-    """
-    per_step_max = 2 * body_turn(max_step, d) * efficiency
-    n = max(1, math.ceil(target / per_step_max))
-    want = target / n / efficiency   # geometric degrees needed per step
-    # Invert body_turn by bisection -- it is monotonic in a.
-    lo, hi = 0.0, 90.0
-    for _ in range(80):
+def max_rotation(height, r_foot, coxa_limit):
+    """Largest body rotation per half-sweep the legs can actually hold,
+    limited by coxa travel and by the leg running out of reach."""
+    lo, hi = 0.0, 60.0
+    for _ in range(60):
         mid = (lo + hi) / 2
-        if 2 * body_turn(mid, d) < want:
+        try:
+            p = stance_pose(1, mid, height, r_foot)
+            ok = abs(p["coxa"]) <= coxa_limit
+        except Unreachable:
+            ok = False
+        if ok:
             lo = mid
         else:
             hi = mid
-    return n, (lo + hi) / 2
+    return lo
 
 
 # =============================================================
@@ -145,9 +157,15 @@ def main():
     ap.add_argument("degrees", type=int, choices=TURNS,
                     help="how far to turn, clockwise")
     ap.add_argument("--step", type=float, default=DEFAULT_STEP,
-                    help=f"maximum coxa swing per step, degrees "
-                         f"(default {DEFAULT_STEP:g}); the actual angle is "
-                         f"solved down from this so whole steps hit the target")
+                    help=f"maximum BODY rotation per step, degrees "
+                         f"(default {DEFAULT_STEP:g}); solved down so whole "
+                         f"steps hit the target exactly")
+    ap.add_argument("--substeps", type=int, default=5,
+                    help="interpolation points per sweep (default 5). The "
+                         "foot is held planted at each one, so more means a "
+                         "truer arc and less slip.")
+    ap.add_argument("--coxa-limit", type=float, default=50.0,
+                    help="most coxa travel to use, degrees (default 50)")
     ap.add_argument("--efficiency", type=float, default=1.0,
                     help="fraction of the geometric turn actually achieved "
                          "(default 1.0 = no slip). Planted feet scrub and "
@@ -169,8 +187,10 @@ def main():
     legs = list(dict.fromkeys(args.legs))
     if any(l not in ALL_LEGS for l in legs):
         ap.error("--legs must be 1-6")
-    if not 0 < args.step <= 45:
-        ap.error("--step must be between 0 and 45 degrees")
+    if not 0 < args.step <= 90:
+        ap.error("--step must be between 0 and 90 degrees")
+    if not 1 <= args.substeps <= 30:
+        ap.error("--substeps must be 1-30")
     if not 0 < args.lift <= 60:
         ap.error("--lift must be between 0 and 60 degrees")
     if not 1 <= args.speed <= 3400:
@@ -186,32 +206,43 @@ def main():
         print(f"Reachable range: {lo:.0f}..{hi:.0f} mm")
         return 1
 
-    d = foot_radius(base)
-    n_steps, coxa = solve_step(args.degrees, args.step, d, args.efficiency)
-    per_step = 2 * body_turn(coxa, d) * args.efficiency
+    r_foot = planted_radius(base)
+    cap = max_rotation(args.height, r_foot, args.coxa_limit)
+    per_step_max = min(args.step, 2 * cap) * args.efficiency
+    n_steps = max(1, math.ceil(args.degrees / per_step_max))
+    per_step = args.degrees / n_steps
+    half = per_step / 2 / args.efficiency
 
     print(f"CRABORA turn -- {args.degrees}° CLOCKWISE")
-    print(f"  standing at {args.height:g} mm; foot {d:.0f} mm from the coxa "
-          f"axis, {BODY_TO_COXA_AXIS + d:.0f} mm from the body centre")
-    print(f"  coxa ±{coxa:.1f}° per step turns the body "
-          f"{2 * body_turn(coxa, d):.2f}° geometrically "
-          f"(ratio {body_turn(coxa, d) / coxa:.3f} -- the hip offset)")
-    if args.efficiency < 1.0:
-        print(f"  x{args.efficiency:.2f} efficiency -> {per_step:.2f}° "
-              f"expected per step")
-    print(f"  {n_steps} step(s) x {per_step:.2f}° = "
-          f"{n_steps * per_step:.1f}°")
-    print(f"  foot scrub {scrub(coxa, d):.1f} mm per sweep")
+    try:
+        ex = stance_pose(1, half, args.height, r_foot)
+    except Unreachable as e:
+        print(f"  Cannot hold a foot planted through ±{half:.1f}°: {e}")
+        return 1
+    print(f"  standing at {args.height:g} mm; feet planted {r_foot:.0f} mm "
+          f"from the body centre")
+    print(f"  {n_steps} step(s) x {per_step:.1f}° = {args.degrees}°")
+    print(f"  each sweep rotates the body ±{half:.1f}° about the planted "
+          f"feet, in {args.substeps} interpolated points")
+    print(f"  at the extreme: coxa {ex['coxa']:+.1f}°, femur "
+          f"{ex['femur']:+.1f}°, flex {ex['tibia']:.1f}°  "
+          f"(limit ±{args.coxa_limit:g}°, max half-sweep {cap:.1f}°)")
+    print(f"  feet are held PLANTED throughout -- no scrub, so no forced "
+          f"slip")
     print(f"  every coxa turns the SAME way -- a turn has no left/right "
           f"mirror\n")
 
     if args.dry_run:
-        print(f"  {'step':>5} {'stance':>7} {'coxa -> ':>10} {'cumulative':>11}")
+        print(f"\n  {'step':>5} {'stance':>7} {'body':>16} {'coxa sweep':>16}"
+              f" {'cumulative':>11}")
         total = 0.0
+        lo = stance_pose(1, -half, args.height, r_foot)
+        hi = stance_pose(1, +half, args.height, r_foot)
         for i in range(1, n_steps + 1):
-            stance = "B" if i % 2 else "A"
             total += per_step
-            print(f"  {i:>5} {stance:>7}   {-coxa:+.1f} -> {coxa:+.1f}°"
+            print(f"  {i:>5} {('B' if i % 2 else 'A'):>7}"
+                  f" {-half:+6.1f}..{half:+6.1f}°"
+                  f" {lo['coxa']:+7.1f}..{hi['coxa']:+6.1f}°"
                   f" {total:>10.1f}°")
         print("\n  Dry run -- nothing was sent to the bus.")
         return 0
@@ -273,11 +304,11 @@ def main():
                    if to or abs(p - targets[k]) > LOADED_TOLERANCE]
             return bad
 
-        # Start with every coxa at -coxa, so the first stance sweep is a
-        # full one rather than a half.
+        # Every leg starts holding its foot with the body pre-rotated
+        # back by half a step, so the first sweep is a full one.
         print("\n  -> set up")
-        send({l: dict(base, coxa=-coxa) for l in legs}, "setup")
-        held = {l: -coxa for l in legs}    # where each coxa currently is
+        start = {l: stance_pose(l, -half, args.height, r_foot) for l in legs}
+        send(start, "setup")
 
         trouble = {}
         total = 0.0
@@ -287,39 +318,51 @@ def main():
             tag = "B" if i % 2 else "A"
             print(f"  step {i}/{n_steps} (stance {tag}):", end="", flush=True)
 
-            # LIFT: femur only. The coxas must NOT move here -- the
-            # swing leg is still on the floor for the first part of this
-            # move, and sweeping its coxa now drags the foot and pulls
-            # the body back round, cancelling most of the turn. That bug
-            # cost about two thirds of the commanded rotation.
-            frame = {l: (dict(base, coxa=held[l], femur=base["femur"] + args.lift)
-                         if l in swing else dict(base, coxa=held[l]))
+            # LIFT: femur only. Moving a coxa here would drag a foot that
+            # is still on the floor and pull the body back round.
+            frame = {l: (dict(start[l], femur=start[l]["femur"] + args.lift)
+                         if l in swing else dict(start[l]))
                      for l in legs}
             for k in send(frame, "lift"):
                 trouble.setdefault(k[0], set()).add("lift")
             print(" lift", end="", flush=True)
 
-            # SWEEP: stance -coxa -> +coxa pushes the body round, while
-            # the swing tripod -- now safely in the air -- resets to
-            # -coxa ready to take over.
-            frame = {}
-            for l in legs:
-                if l in stance:
-                    frame[l] = dict(base, coxa=+coxa)
-                else:
-                    frame[l] = dict(base, coxa=-coxa,
-                                    femur=base["femur"] + args.lift)
-            for k in send(frame, "sweep"):
-                trouble.setdefault(k[0], set()).add("sweep")
+            # SWEEP: walk the body round in interpolated points. At each
+            # one the stance legs are re-solved to hold their feet on the
+            # SAME patch of floor -- that is the whole point, and why
+            # there is no scrub to slip on.
+            reset = {l: stance_pose(l, -half, args.height, r_foot)
+                     for l in swing}
+            for j in range(1, args.substeps + 1):
+                frac = j / args.substeps
+                rho = -half + (2 * half) * frac
+                frame = {}
+                for l in legs:
+                    if l in stance:
+                        frame[l] = stance_pose(l, rho, args.height, r_foot)
+                    else:
+                        # swinging: glide to the reset pose, staying up
+                        a, b = start[l], reset[l]
+                        frame[l] = {k: a[k] + (b[k] - a[k]) * frac
+                                    for k in ("coxa", "femur", "tibia")}
+                        frame[l]["femur"] += args.lift
+                for k in send(frame, "sweep"):
+                    trouble.setdefault(k[0], set()).add("sweep")
             print(" sweep", end="", flush=True)
 
-            # PLANT: femur back down, coxas held where the sweep left them
-            held = {l: (+coxa if l in stance else -coxa) for l in legs}
-            frame = {l: dict(base, coxa=held[l]) for l in legs}
-            for k in send(frame, "plant"):
+            # PLANT: femur down, everything else held.
+            landed = {}
+            for l in legs:
+                landed[l] = (stance_pose(l, +half, args.height, r_foot)
+                             if l in stance else reset[l])
+            for k in send(landed, "plant"):
                 trouble.setdefault(k[0], set()).add("plant")
             total += per_step
             print(f" plant   ({total:.1f}° of {args.degrees}°)")
+
+            # The stance legs are now at +half; next step they swing. The
+            # legs just planted are at -half and become stance.
+            start = landed
 
         print("\n  -> back to neutral stance")
         send({l: base for l in legs}, "finish")
@@ -330,8 +373,10 @@ def main():
                 print(f"  ⚠ leg {leg} ({LEG_NAME[leg]}): short on "
                       f"{', '.join(sorted(trouble[leg]))}")
         print(f"\n  Turned {total:.1f}° clockwise in {n_steps} step(s).")
-        print(f"  Expect some drift: the feet scrub {scrub(coxa, d):.1f} mm "
-              f"per sweep, and scrub is slip.")
+        print(f"  Feet were held planted throughout. If it still falls "
+              f"short, that is")
+        print(f"  real slip rather than forced scrub -- measure it and pass "
+              f"--efficiency.")
         return 1 if trouble else 0
 
     except KeyboardInterrupt:
