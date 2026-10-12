@@ -10,8 +10,8 @@ Since we're working on a Bamboo A1 Mini printer, unibody is really a large hexag
 
 The following components bolt to the unibody:
 
-a.) battery
-b.) BEC converter
+a.) Battery
+b.) BEC converter (Qty 2)
 c.) Raspberry Pi
 d.) URT (Qty 3)
 e.) Coxa servo w. cap (Qty 6)
