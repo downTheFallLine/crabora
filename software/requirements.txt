@@ -1,2 +1,6 @@
 pyserial>=3.5
 feetech-servo-sdk
+
+# IMU (MPU-6050) over I2C -- tests/test_06_imu.py.
+# Pi only; nothing else in software/ needs it.
+smbus2>=0.4
