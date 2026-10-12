@@ -52,6 +52,11 @@ WEB_DIR = os.path.join(_HERE, "web")
 app = Flask(__name__, static_folder=None)
 ARB = None
 AGENT = None
+# Why the agent is off, in the words of whatever actually failed. Without
+# this the reason reached only the Pi's console at startup, so a browser
+# on another machine could not tell a missing API key from a missing
+# dependency -- both just showed "no agent".
+AGENT_REASON = "not started"
 
 
 def _fail(message, code=500, **extra):
@@ -80,7 +85,7 @@ def health():
         "ok": True,
         "bus": {"available": ARB.available, "detail": ARB.reason},
         "agent": AGENT.describe() if AGENT else
-                 {"enabled": False, "reason": "no model configured"},
+                 {"enabled": False, "reason": AGENT_REASON},
         "phase": "read-only",
     })
 
@@ -214,7 +219,7 @@ def _browsable_urls(host, port):
 
 
 def main():
-    global ARB, AGENT
+    global ARB, AGENT, AGENT_REASON
     ap = argparse.ArgumentParser(description="CRABORA agentix API")
     ap.add_argument("--host", default="0.0.0.0")
     ap.add_argument("--port", type=int, default=5000)
@@ -239,7 +244,8 @@ def main():
         print(f"  agent: {AGENT.describe()['model']}")
     except Exception as e:                            # noqa: BLE001
         AGENT = None
-        print(f"  agent: disabled ({type(e).__name__}: {e})")
+        AGENT_REASON = f"{type(e).__name__}: {e}"
+        print(f"  agent: disabled ({AGENT_REASON})")
         print("         the UI and tools still work; chat replies will say so")
 
     # NOT args.host -- that defaults to 0.0.0.0, which is a bind address
