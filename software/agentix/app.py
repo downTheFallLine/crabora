@@ -178,6 +178,41 @@ def stop():
 # =============================================================
 # MAIN
 # =============================================================
+def _lan_ip():
+    """This machine's address on the LAN, or None.
+
+    Opens a UDP socket toward an off-subnet address and asks the kernel
+    which local interface it would use. Nothing is sent -- UDP connect()
+    only sets the default peer -- so this needs no network and no DNS.
+    Beats gethostname() lookups, which on a stock Pi answer 127.0.1.1.
+    """
+    import socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("192.0.2.1", 1))      # TEST-NET-1, guaranteed unrouted
+        return s.getsockname()[0]
+    except OSError:
+        return None
+    finally:
+        s.close()
+
+
+def _browsable_urls(host, port):
+    """URLs you can actually open, given a bind address you may not.
+
+    0.0.0.0 means "every interface" and :: means the same for IPv6.
+    Neither is a destination: a browser pointed at one reports the
+    address as unreachable while the server is sitting there working.
+    """
+    if host not in ("0.0.0.0", "::", ""):
+        return [f"http://{host}:{port}/"]
+    urls = [f"http://127.0.0.1:{port}/   (on this machine)"]
+    ip = _lan_ip()
+    if ip:
+        urls.insert(0, f"http://{ip}:{port}/   (from another machine)")
+    return urls
+
+
 def main():
     global ARB, AGENT
     ap = argparse.ArgumentParser(description="CRABORA agentix API")
@@ -207,7 +242,12 @@ def main():
         print(f"  agent: disabled ({type(e).__name__}: {e})")
         print("         the UI and tools still work; chat replies will say so")
 
-    print(f"\n  http://{args.host}:{args.port}/\n")
+    # NOT args.host -- that defaults to 0.0.0.0, which is a bind address
+    # ("every interface"), not somewhere a browser can go. Printing it
+    # sends you to ERR_ADDRESS_INVALID while the server is working fine.
+    for url in _browsable_urls(args.host, args.port):
+        print(f"\n  {url}")
+    print()
     try:
         app.run(host=args.host, port=args.port, debug=args.debug,
                 threaded=True)
