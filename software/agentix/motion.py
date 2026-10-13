@@ -40,6 +40,7 @@ from gait_lib import (  # noqa: E402
     ALL_LEGS, CENTER_POSITION, COXA_JOINT_DIGIT, FEMUR_JOINT_DIGIT,
     JOINT_NAME, TIBIA_JOINT_DIGIT, ADDR_MAX_ANGLE, ADDR_MIN_ANGLE,
     ADDR_PRESENT_POSITION, ADDR_PRESENT_TEMP, to_counts, to_degrees,
+    delta_degrees,
 )
 from arbiter import ArbiterError, Cancelled, describe  # noqa: E402
 
@@ -249,7 +250,9 @@ def nudge(arbiter, safety, leg: int, joint: str, degrees: float):
 
     return _done(safety, {
         "action": "nudge", "joint": describe(sid), "asked_deg": degrees,
-        "moved_deg": round(to_degrees(end - start), 1),
+        # delta_degrees: end-start is a difference, and to_degrees
+        # would subtract centre again -- 180 degrees of nonsense.
+        "moved_deg": round(delta_degrees(end - start), 1),
         "clamped": res["clamped"] or None,
         "note": "clamped by the joint's own travel limit"
                 if res["clamped"] else None,

@@ -170,7 +170,26 @@ def to_counts(deg):
 
 
 def to_degrees(pos):
+    """An ABSOLUTE servo position, in degrees from centre.
+
+    Note this is NOT the inverse of to_counts(): it subtracts
+    CENTER_POSITION and to_counts() does not. Passing a difference to
+    this function is wrong by 180 degrees, silently -- use
+    delta_degrees() for that. The asymmetry is baked into too many
+    callers to change now, so it is named and guarded instead.
+    """
     return (pos - CENTER_POSITION) * 360.0 / COUNTS_PER_REV
+
+
+def delta_degrees(counts):
+    """A DIFFERENCE in counts, in degrees. The true inverse of to_counts().
+
+    Exists because to_degrees() is not it, and the resulting 180-degree
+    error is the quiet kind: positions still look plausible, and it only
+    shows up as a measurement that is reflected about some arbitrary
+    value rather than obviously broken.
+    """
+    return counts * 360.0 / COUNTS_PER_REV
 
 
 def forward_sign(leg, invert=False):

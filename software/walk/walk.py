@@ -174,6 +174,39 @@ def plan(distance, stride, height, foot_out, coxa_limit, heading, legs):
             "per_step": per_step, "half": half}
 
 
+def measure_stance(packet, joints, legs):
+    """What height is the body ACTUALLY at, from the present angles?
+
+    walk.py used to take --height on faith. If the robot is not up at
+    that height -- never stood, or sagged under its own weight because
+    the supply cannot hold it -- then the swing legs lift into a body
+    that is too low and the feet scuff. From the outside that looks like
+    a gait with no lift in it, which sends you hunting in the wrong
+    place. Measuring costs one pass over the bus.
+
+    Returns {leg: height_mm}, the deck clearance each leg implies.
+    """
+    from gait_lib import ADDR_PRESENT_POSITION, CENTER_POSITION, delta_degrees
+    out = {}
+    for leg in legs:
+        try:
+            pos = {}
+            for dg, name in JOINTS:
+                sid, port = joints[dg][leg]
+                pos[name] = read2(packet, port, sid, ADDR_PRESENT_POSITION,
+                                  "position")
+        except (BusError, KeyError):
+            continue
+        # Counts -> pose degrees, matching pose_counts() in stand.py.
+        # delta_degrees, NOT to_degrees: these are differences from
+        # centre, and to_degrees would subtract centre a second time.
+        femur = -delta_degrees(pos["femur"] - CENTER_POSITION)
+        tibia = -delta_degrees(pos["tibia"] - CENTER_POSITION)
+        _out, down = leg_fk(femur, tibia)
+        out[leg] = down - COXA_VERTICAL
+    return out
+
+
 # =============================================================
 # THE WALK
 # =============================================================
@@ -298,6 +331,8 @@ def main():
     ap.add_argument("--legs", type=int, nargs="+", default=list(ALL_LEGS))
     ap.add_argument("--no-pause", dest="pause", action="store_false",
                     help="do not ask before moving")
+    ap.add_argument("--force", action="store_true",
+                    help="walk even if the measured stance is too low")
     ap.add_argument("--dry-run", action="store_true",
                     help="print the plan and the geometry, touch nothing")
     ap.add_argument("--ports", nargs="+")
@@ -399,6 +434,29 @@ def main():
                 limits[(leg, dg)] = (
                     read2(packet, port, sid, ADDR_MIN_ANGLE, "min"),
                     read2(packet, port, sid, ADDR_MAX_ANGLE, "max"))
+
+        measured = measure_stance(packet, joints, legs)
+        if measured:
+            lo = min(measured.values())
+            hi = max(measured.values())
+            print(f"\n  measured stance: {lo:.0f}..{hi:.0f} mm deck "
+                  f"clearance (commanded {args.height:g})")
+            for leg in sorted(measured):
+                if abs(measured[leg] - args.height) > 25.0:
+                    print(f"    leg {leg} ({LEG_NAME[leg]}): "
+                          f"{measured[leg]:.0f} mm")
+            if lo < args.height - 25.0:
+                print(f"\n  ⚠ THE BODY IS {args.height - lo:.0f} mm LOWER "
+                      f"THAN THE GAIT ASSUMES.")
+                print(f"    The swing legs lift about 50 mm, so at this "
+                      f"height the feet will")
+                print(f"    scuff instead of clearing -- which looks exactly "
+                      f"like a gait with no")
+                print(f"    lift in it. Stand first, or walk at "
+                      f"--height {lo:.0f}.")
+                if not args.force:
+                    print("\n  Stopping. Pass --force to walk anyway.")
+                    return 1
 
         if args.pause and not confirm(
                 f"Standing, clear of obstacles, and ready to walk "
