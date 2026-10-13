@@ -302,86 +302,131 @@ def phase_collapse(packet, joints, legs, limits, dry):
 
 def phase_untangle(packet, joints, legs, limits, dry, shake_enabled=True,
                    compact_out=140.0, compact_clear=70.0):
-    """One leg at a time: compact, rotate coxa to centre, set down."""
-    print("\n=== UNTANGLE (one leg at a time) ===")
+    """Fold every leg, THEN rotate every coxa. All six together.
+
+    This used to run one leg at a time, which was worse as well as
+    slower. A leg whose turn had come rotated its coxa while its
+    neighbours were still lying extended on the floor -- so the one
+    thing the phase exists to prevent, a 440 mm lever sweeping through
+    another leg, was still possible between legs even though it was
+    prevented within one.
+
+    Doing it in two global passes removes that entirely: nothing rotates
+    until everything is folded and lifted.
+
+      1. screen every leg against its own travel limits
+      2. femurs up (only ever raising, as in COLLAPSE)
+      3. tibias fold, with the femurs already clear
+      4. only now, every coxa to centre at once
+
+    The body is belly-down throughout -- COLLAPSE put it there -- so
+    lifting all six legs at once costs nothing in stability. Current is
+    no worse than COLLAPSE, which already moves six femurs together.
+
+    Legs are dropped from the remaining passes the moment they fail, so
+    a stuck leg never reaches the coxa rotation.
+    """
+    print("\n=== UNTANGLE (all legs together) ===")
     compact_pose = pose_compact(compact_out, compact_clear)
     compact = pose_counts(compact_pose)
-    compact_need = compact_pose["femur"]
     print(f"  (each leg ends lifted at femur {compact_pose['femur']:+.0f}°, "
           f"flex {compact_pose['tibia']:.0f}° -- "
           f"{foot_height(compact_pose['femur'], compact_pose['tibia']):.0f} mm "
           f"of floor clearance; it is NOT set down until the stand phase)")
+
+    if dry:
+        print(f"  1. screen travel limits")
+        print(f"  2. femurs -> {compact_pose['femur']:+.0f}° (all at once)")
+        print(f"  3. tibias  -> flex {compact_pose['tibia']:.0f}° (all at once)")
+        print(f"  4. coxas   -> centre (all at once)")
+        return []
+
     failed = []
+    ok = []
+
+    # --- 1. screen -------------------------------------------------
+    # What the travel limits will ACTUALLY allow, not what we asked for.
+    # A femur that clamps short leaves the foot hanging low, and rotating
+    # the coxa then drags it -- which is how legs dug in and stuck on
+    # 2026-10-11.
     for leg in legs:
-        print(f"  leg {leg} ({LEG_NAME[leg]}):", end="", flush=True)
-        if dry:
-            print(f"  compact femur {compact_pose['femur']:+.0f}°"
-                  f" flex {compact_pose['tibia']:.0f}°  -> coxa 0  (stays lifted)")
-            continue
-        # What the travel limits will ACTUALLY allow, not what we asked
-        # for. A femur that clamps short leaves the foot hanging low, and
-        # rotating the coxa then drags it across the floor -- which is
-        # how legs dug in and stuck on 2026-10-11.
         fem_lim = limits.get((leg, FEMUR_JOINT_DIGIT))
         tib_lim = limits.get((leg, TIBIA_JOINT_DIGIT))
-        if fem_lim and tib_lim:
-            got_f = -to_degrees(clamp(compact[FEMUR_JOINT_DIGIT], fem_lim))
-            got_t = -to_degrees(clamp(compact[TIBIA_JOINT_DIGIT], tib_lim))
-            clear = foot_height(got_f, got_t)
-            if clear < FLOOR_MARGIN:
-                print(f"  REFUSED: travel limits only reach femur "
-                      f"{got_f:+.0f}°/flex {got_t:.0f}°, leaving the foot "
-                      f"{clear:+.0f} mm vs the floor.")
-                print(f"    Rotating the coxa would drag it. Widen the femur "
-                      f"limit (needs about +{compact_need:.0f}°) and retry.")
-                failed.append(leg)
-                continue
-
-        steps = (
-            ("compact", {d: compact[d] for d in
-                         (FEMUR_JOINT_DIGIT, TIBIA_JOINT_DIGIT)}),
-            ("rotate",  {COXA_JOINT_DIGIT: CENTER_POSITION}),
-        )
-        leg_ok = True
-        for name, want in steps:
-            # Abort this leg the moment a step fails. In particular, if
-            # COMPACT did not complete, the leg is still extended, and
-            # rotating its coxa would sweep a 440 mm lever through its
-            # neighbours -- the exact thing this phase exists to prevent.
-            if not leg_ok:
-                print(f" [skipping {name}: leg not compact]", end="", flush=True)
-                continue
-            group = {d: joints[d][leg] for d in want if leg in joints[d]}
-            if not group:
-                continue
-            targets = {d: clamp(want[d], limits[(leg, d)]) for d in group}
-            results = move_group(packet, group, targets)
-            stuck = [d for d, (pos, to) in results.items()
-                     if to or abs(pos - targets[d]) > POSITION_TOLERANCE]
-            if stuck and shake_enabled:
-                print(f" {name}✗", end="", flush=True)
-                for d in stuck:
-                    sid, port = group[d]
-                    print(f"\n    {JOINT_NAME[d]} stuck, shaking:")
-                    if shake(packet, sid, port, limits[(leg, d)]):
-                        r = move_group(packet, {d: group[d]}, {d: targets[d]})
-                        pos, to = r[d]
-                        if not to and abs(pos - targets[d]) <= POSITION_TOLERANCE:
-                            continue
-                    leg_ok = False
-                    print(f"    could not free leg {leg} {JOINT_NAME[d]}")
-                print("   ", end="", flush=True)
-                if not leg_ok:
-                    continue
-            elif stuck:
-                leg_ok = False
-                print(f" {name}✗", end="", flush=True)
-            else:
-                print(f" {name}", end="", flush=True)
-        print()
-        if not leg_ok:
+        if not (fem_lim and tib_lim):
+            ok.append(leg)
+            continue
+        got_f = -to_degrees(clamp(compact[FEMUR_JOINT_DIGIT], fem_lim))
+        got_t = -to_degrees(clamp(compact[TIBIA_JOINT_DIGIT], tib_lim))
+        clear = foot_height(got_f, got_t)
+        if clear < FLOOR_MARGIN:
+            print(f"  leg {leg} ({LEG_NAME[leg]}) REFUSED: travel limits only "
+                  f"reach femur {got_f:+.0f}°/flex {got_t:.0f}°,")
+            print(f"    leaving the foot {clear:+.0f} mm vs the floor. "
+                  f"Rotating the coxa would drag it.")
+            print(f"    Widen the femur limit (needs about "
+                  f"+{compact_pose['femur']:.0f}°) and retry.")
             failed.append(leg)
-    return failed
+        else:
+            ok.append(leg)
+
+    if not ok:
+        print("  no leg can be folded without dragging. Stopping.")
+        return failed
+
+    def run(label, digit, target_counts):
+        """One joint across every surviving leg, with shake recovery."""
+        print(f"  {label}", end="", flush=True)
+        # .get: if a whole joint digit failed discovery, skip the
+        # pass rather than raising out of the middle of a recovery.
+        found = joints.get(digit, {})
+        group = {l: found[l] for l in ok if l in found}
+        if not group:
+            print("  (none)")
+            return
+        targets = {l: clamp(target_counts, limits[(l, digit)]) for l in group}
+        results = move_group(packet, group, targets)
+        stuck = [l for l, (pos, to) in results.items()
+                 if to or abs(pos - targets[l]) > POSITION_TOLERANCE]
+        if not stuck:
+            print("  ok")
+            return
+        print(f"  {len(stuck)} stuck: {sorted(stuck)}")
+        for leg in stuck:
+            sid, port = group[leg]
+            freed = False
+            if shake_enabled:
+                print(f"    leg {leg} {JOINT_NAME[digit]} stuck, shaking:")
+                if shake(packet, sid, port, limits[(leg, digit)]):
+                    r = move_group(packet, {leg: group[leg]},
+                                   {leg: targets[leg]})
+                    pos, to = r[leg]
+                    freed = (not to and
+                             abs(pos - targets[leg]) <= POSITION_TOLERANCE)
+            if not freed:
+                print(f"    could not free leg {leg} {JOINT_NAME[digit]} "
+                      f"-- dropping it from the rest of this phase")
+                if leg in ok:
+                    ok.remove(leg)
+                if leg not in failed:
+                    failed.append(leg)
+
+    # --- 2/3. fold, femurs before tibias ---------------------------
+    # Same reasoning as COLLAPSE: raise first, fold the knee once it is
+    # clear. Folding a knee with the femur still low drives the foot at
+    # the floor.
+    run(f"1. femurs -> {compact_pose['femur']:+.0f}°",
+        FEMUR_JOINT_DIGIT, compact[FEMUR_JOINT_DIGIT])
+    run(f"2. tibias  -> flex {compact_pose['tibia']:.0f}°",
+        TIBIA_JOINT_DIGIT, compact[TIBIA_JOINT_DIGIT])
+
+    # --- 4. only now, the coxas ------------------------------------
+    # Every surviving leg is folded and lifted, so no coxa can sweep a
+    # neighbour and no foot is down to be dragged.
+    run("3. coxas  -> centre", COXA_JOINT_DIGIT, CENTER_POSITION)
+
+    if failed:
+        print(f"  left behind: {sorted(failed)}")
+    return sorted(failed)
 
 
 def phase_stand(packet, joints, legs, limits, height, foot_out, dry,
@@ -650,7 +695,8 @@ def main():
 
         if run in ("untangle", "all"):
             if args.pause and not confirm(
-                    "Ready to UNTANGLE? Legs move one at a time."):
+                    "Ready to UNTANGLE? All six legs fold together, then every "
+                    "coxa rotates at once. The body stays on its belly."):
                 print("\n  Stopped.")
                 return 1
             failed = phase_untangle(packet, joints, legs, limits, False,

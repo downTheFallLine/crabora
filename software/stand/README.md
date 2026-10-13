@@ -33,7 +33,7 @@ the foot at about 203 mm radial, still ~21 mm clear of the deck edge.
 So the tangle risk is **leg against neighbour**, not leg under body. At
 the nominal straight-out pose adjacent feet are ~440 mm apart; the
 survey flags any pair closer than 120 mm. That is also why the untangle
-sequence works one leg at a time — the thing a leg can collide with is
+sequence works all legs together — the thing a leg can collide with is
 the leg next to it.
 
 The survey is free and risk-free. Nothing moves. `survey.py`.
@@ -49,7 +49,7 @@ So do not recover *toward* standing. Deliberately go belly-down first,
 confirm the body is resting, and untangle from there. A few seconds buys
 a state where nothing you do can topple anything.
 
-### 3. Untangle one leg at a time, compact before you swing
+### 3. Untangle all legs together, compact before you swing
 
 **Across legs: strictly sequential.** Six legs moving at once in an
 unknown configuration is six chances for neighbours to fight each other.
