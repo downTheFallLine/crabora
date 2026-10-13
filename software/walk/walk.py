@@ -69,7 +69,13 @@ DEFAULT_STRIDE = 50.0    # mm of body travel per step. Bigger covers
                          # loads the femur harder at the extremes.
 DEFAULT_HEIGHT = 80.0
 DEFAULT_SPEED = 300
-DEFAULT_LIFT = 25.0      # femur degrees added to lift the swing tripod
+# Femur degrees added to lift the swing tripod. Was 25, which computes
+# to a 50 mm minimum through the swing -- ample on paper, and the feet
+# were observed scraping anyway. The difference is sag: a stance leg
+# being commanded to move under full load holds far worse than one
+# standing still, and none of it reaches the encoders. 35 buys 24 mm
+# more for nothing, since the femur has travel to spare here.
+DEFAULT_LIFT = 35.0
 DEFAULT_SUBSTEPS = 5
 DEFAULT_COXA_LIMIT = 50.0
 
