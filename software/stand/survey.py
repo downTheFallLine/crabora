@@ -46,6 +46,7 @@ sys.path.insert(0, os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "walk"))
 
 from gait_lib import (  # noqa: E402
+    warn_if_service_running,
     ALL_LEGS, BODY_TO_COXA_AXIS, CENTER_POSITION, COXA_JOINT_DIGIT,
     DECK_APOTHEM,
     COXA_RADIAL, COXA_TANGENT, COXA_VERTICAL, FEMUR_JOINT_DIGIT, FEMUR_LEN,
@@ -154,6 +155,7 @@ def main():
     if not devices:
         print("No FE-URT-2 boards found. Run tests/test_02_urt_usb_visibility.py.")
         return 1
+    warn_if_service_running()
     ports = open_ports(devices)
     if not ports:
         print("No URT could be opened.")

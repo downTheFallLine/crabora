@@ -19,6 +19,12 @@ import os
 import sys
 import time
 
+try:
+    from serial import SerialException
+except ImportError:      # pyserial absent: geometry still works
+    class SerialException(Exception):
+        pass
+
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # The bus libraries are optional on purpose: the geometry constants and
@@ -289,20 +295,40 @@ def reset_bus_stats():
 
 
 def _txrx(call, sid, what, tries=None):
-    """Run a packet call, retrying a lost reply a couple of times."""
+    """Run a packet call, retrying a lost reply a couple of times.
+
+    Two kinds of failure arrive here and both are retried. The SDK
+    reports a lost reply as a status code, which is the ordinary case.
+    But pyserial can also RAISE -- "device reports readiness to read but
+    returned no data" -- and that used to escape as a traceback from
+    whatever phase happened to be running, which is a poor way to find
+    out that something else has the port open.
+    """
     global _retries, _failures
     tries = BUS_RETRIES + 1 if tries is None else tries
     last = None
     for attempt in range(tries):
-        result = call()
-        comm = result[-2] if len(result) == 3 else result[0]
-        if comm == COMM_SUCCESS:
-            return result
-        last = comm
+        try:
+            result = call()
+        except (SerialException, OSError) as e:
+            last = e
+        else:
+            comm = result[-2] if len(result) == 3 else result[0]
+            if comm == COMM_SUCCESS:
+                return result
+            last = comm
         if attempt + 1 < tries:
             _retries += 1
             time.sleep(RETRY_DELAY)
+
     _failures += 1
+    if isinstance(last, Exception):
+        raise BusError(
+            f"servo {sid}: {what}: the serial port stopped answering "
+            f"({last}). Two things do this: something ELSE has the port "
+            f"open -- check `systemctl is-active crabora-agentix`, the "
+            f"service and a CLI program cannot share a bus -- or the URT "
+            f"re-enumerated, which a supply brownout will cause.")
     raise BusError(f"servo {sid}: {what}: {PACKET.getTxRxResult(last)} "
                    f"(after {tries} attempts)")
 
@@ -344,6 +370,44 @@ def write2(packet, port, sid, addr, val, what):
 # =============================================================
 # BUS
 # =============================================================
+AGENTIX_SERVICE = "crabora-agentix"
+
+
+def service_holds_bus():
+    """Is the agentix service running, and therefore holding the ports?
+
+    The service keeps the URTs open for the whole time it is up -- that
+    is deliberate, it is what makes the web UI answer quickly. But it
+    means a CLI program started alongside it is a second reader on a
+    half-duplex bus, and the symptom is not a clean error: packets
+    interleave, replies land in the wrong process, and pyserial
+    eventually raises in whichever one loses the race.
+
+    Cheap to check and worth checking every time, because the failure it
+    prevents costs an evening.
+    """
+    try:
+        import subprocess
+        return subprocess.run(
+            ["systemctl", "is-active", "--quiet", AGENTIX_SERVICE],
+            timeout=2).returncode == 0
+    except Exception:          # noqa: BLE001  -- not systemd, or no systemctl
+        return False
+
+
+def warn_if_service_running():
+    """Print a warning if the service has the bus. Returns True if it does."""
+    if not service_holds_bus():
+        return False
+    print(f"\n  ⚠ {AGENTIX_SERVICE} IS RUNNING and holds the servo ports.")
+    print(f"    Two readers on a half-duplex bus interleave their packets,")
+    print(f"    and the loser gets 'device reports readiness to read but")
+    print(f"    returned no data' partway through a move. Stop it first:")
+    print(f"        sudo systemctl stop {AGENTIX_SERVICE}")
+    print(f"    and start it again when you are done.\n")
+    return True
+
+
 def open_ports(devices):
     """Open each URT at the bus baud rate. Returns {device: PortHandler}."""
     ports = {}
