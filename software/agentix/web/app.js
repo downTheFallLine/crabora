@@ -88,6 +88,15 @@ const CONSUMED = {
   dance:    ["seconds", "frames", "cancelled"],
 };
 
+/* Bus retries deserve to be noticed, not folded into a nested block. */
+function busWarning(d) {
+  if (!d.bus) return null;
+  const r = d.bus.retries || 0, f = d.bus.failures || 0;
+  return `bus needed ${r} re-send${r === 1 ? "" : "s"}` +
+         (f ? ` and ${f} failed outright` : "") +
+         " \u2014 likely the supply sagging under load";
+}
+
 function fmtValue(key, v) {
   if (v === null || v === undefined) return null;      // drop empty rows
   if (Array.isArray(v)) {
@@ -144,6 +153,8 @@ const sayData = (who, data) =>
     }
     const head = headline(data);
     if (head) b.appendChild(el("p", "headline", head));
+    const warn = busWarning(data);
+    if (warn) b.appendChild(el("p", "warn-line", warn));
     const box = el("div", "kvs");
     renderInto(box, data, 0, head ? (CONSUMED[data.action] || []) : []);
     if (box.children.length) b.appendChild(box);

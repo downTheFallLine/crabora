@@ -337,3 +337,10 @@ details.raw pre { margin-top: 8px; }
 @media (prefers-reduced-motion: reduce) {
   .btn.mic.listening .dot { animation: none; }
 }
+
+/* A motion that limped through should not look like a clean one. */
+.warn-line {
+  margin: 0 0 8px;
+  color: var(--warn);
+  font-size: 13.5px;
+}

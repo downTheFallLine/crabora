@@ -36,6 +36,7 @@ for _d in ("walk", "stand", "turn", "dance"):
     sys.path.insert(0, os.path.join(_SOFTWARE, _d))
 
 from gait_lib import (  # noqa: E402
+    bus_stats, reset_bus_stats,
     ALL_LEGS, CENTER_POSITION, COXA_JOINT_DIGIT, FEMUR_JOINT_DIGIT,
     JOINT_NAME, TIBIA_JOINT_DIGIT, ADDR_MAX_ANGLE, ADDR_MIN_ANGLE,
     ADDR_PRESENT_POSITION, ADDR_PRESENT_TEMP, to_counts, to_degrees,
@@ -153,11 +154,30 @@ def _gate(arbiter, safety, legs=None):
     """Cheap permission check first, then the expensive bus read."""
     safety.require()                 # raises NotArmed
     arbiter.clear_stop()             # an old stop should not linger
-    return preflight(arbiter, legs)
+    out = preflight(arbiter, legs)
+    reset_bus_stats()                # count retries for THIS motion only
+    return out
 
 
 def _done(safety, result):
+    """Attach bus health to every motion result.
+
+    A motion that completed after forty retries is telling you something
+    a clean one is not -- usually that the supply is sagging under load,
+    since a browning-out servo drops packets exactly like a loose
+    connector does. Without this the retries are invisible and the only
+    symptom is the occasional hard failure.
+    """
     safety.touch()
+    retries, failures = bus_stats()
+    if retries or failures:
+        result["bus"] = {
+            "retries": retries,
+            "failures": failures,
+            "note": ("the bus needed re-sends. Under load this is usually "
+                     "the supply sagging rather than wiring -- check the "
+                     "voltage with an inline meter while it moves."),
+        }
     return result
 
 

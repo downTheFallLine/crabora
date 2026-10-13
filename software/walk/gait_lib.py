@@ -194,30 +194,88 @@ class BusError(Exception):
     pass
 
 
+# Retries. The bus is half-duplex and shared, and six servos switching
+# current is an electrically noisy place, so an occasional lost reply is
+# normal and not worth aborting a gait over. One lost packet used to kill
+# the whole motion.
+#
+# But a retry that hides a real fault is worse than the abort was: a
+# browning-out supply drops packets too, and that is a thing to fix, not
+# to paper over. So retries are COUNTED, and callers are expected to
+# report the count. A gait that completes with forty retries is telling
+# you something a gait that completes with none is not.
+#
+# Safe for these registers specifically: goal, speed and torque writes
+# are idempotent, so re-sending one the servo already applied is a no-op.
+# Do not reuse this for anything that is not.
+BUS_RETRIES = 2
+RETRY_DELAY = 0.004      # a touch over one 1 Mbaud packet time
+
+_retries = 0
+_failures = 0
+
+
+def bus_stats():
+    """(retries, failures) since the last reset. Report these."""
+    return _retries, _failures
+
+
+def reset_bus_stats():
+    global _retries, _failures
+    _retries = _failures = 0
+
+
+def _txrx(call, sid, what, tries=None):
+    """Run a packet call, retrying a lost reply a couple of times."""
+    global _retries, _failures
+    tries = BUS_RETRIES + 1 if tries is None else tries
+    last = None
+    for attempt in range(tries):
+        result = call()
+        comm = result[-2] if len(result) == 3 else result[0]
+        if comm == COMM_SUCCESS:
+            return result
+        last = comm
+        if attempt + 1 < tries:
+            _retries += 1
+            time.sleep(RETRY_DELAY)
+    _failures += 1
+    raise BusError(f"servo {sid}: {what}: {PACKET.getTxRxResult(last)} "
+                   f"(after {tries} attempts)")
+
+
+PACKET = None            # set on first use, for getTxRxResult
+
+
+def _remember(packet):
+    global PACKET
+    if PACKET is None:
+        PACKET = packet
+    return packet
+
+
 def read1(packet, port, sid, addr, what):
-    val, comm, _err = packet.read1ByteTxRx(port, sid, addr)
-    if comm != COMM_SUCCESS:
-        raise BusError(f"servo {sid}: {what}: {packet.getTxRxResult(comm)}")
+    _remember(packet)
+    val, _comm, _err = _txrx(
+        lambda: packet.read1ByteTxRx(port, sid, addr), sid, what)
     return val
 
 
 def read2(packet, port, sid, addr, what):
-    val, comm, _err = packet.read2ByteTxRx(port, sid, addr)
-    if comm != COMM_SUCCESS:
-        raise BusError(f"servo {sid}: {what}: {packet.getTxRxResult(comm)}")
+    _remember(packet)
+    val, _comm, _err = _txrx(
+        lambda: packet.read2ByteTxRx(port, sid, addr), sid, what)
     return val
 
 
 def write1(packet, port, sid, addr, val, what):
-    comm, _err = packet.write1ByteTxRx(port, sid, addr, val)
-    if comm != COMM_SUCCESS:
-        raise BusError(f"servo {sid}: {what}: {packet.getTxRxResult(comm)}")
+    _remember(packet)
+    _txrx(lambda: packet.write1ByteTxRx(port, sid, addr, val), sid, what)
 
 
 def write2(packet, port, sid, addr, val, what):
-    comm, _err = packet.write2ByteTxRx(port, sid, addr, val)
-    if comm != COMM_SUCCESS:
-        raise BusError(f"servo {sid}: {what}: {packet.getTxRxResult(comm)}")
+    _remember(packet)
+    _txrx(lambda: packet.write2ByteTxRx(port, sid, addr, val), sid, what)
 
 
 # =============================================================
