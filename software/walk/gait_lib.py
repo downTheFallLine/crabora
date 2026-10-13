@@ -158,6 +158,18 @@ COXA_VERTICAL = 17.6         # up, above the pan disc bottom
 # the floor first.
 CAP_DROP_BELOW_DECK = 21.0
 
+# How much the body actually drops when one tripod comes off the floor,
+# over and above anything the joint angles show.
+#
+# MEASURED 2026-10-13: the chassis went 46 mm -> 33 mm when tripod A
+# lifted, while the stance femurs gave about one degree. Thirteen
+# millimetres the encoders cannot see, so it is mechanical -- structural
+# flex, horn and gear backlash, feet sliding outward under the doubled
+# load, or all three. Every clearance computed from angles is optimistic
+# by at least this much, and by more under a moving load.
+TRIPOD_SAG = 13.0
+
+
 FEMUR_LEN = 100.0            # femur axis -> tibia axis
 TIBIA_LEN = 120.0            # tibia axis -> foot tip
 
@@ -212,6 +224,16 @@ def ground_clearance(deck_height):
     one is how 73 mm turned out to be 52.
     """
     return deck_height - CAP_DROP_BELOW_DECK
+
+
+def tripod_gap(deck_height):
+    """Real gap under the femur caps while one tripod is lifted.
+
+    The binding constraint when walking, and not an obvious one: the
+    feet can be clearing beautifully while the chassis scrapes, because
+    the caps hang lower than anything the kinematics models.
+    """
+    return ground_clearance(deck_height) - TRIPOD_SAG
 
 
 def forward_sign(leg, invert=False):

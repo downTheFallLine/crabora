@@ -59,7 +59,9 @@ from gait_lib import (  # noqa: E402
 from pose import (  # noqa: E402
     Unreachable, leg_fk, leg_ik, pose_stand, stand_height_range,
 )
-from gait_lib import ADDR_PRESENT_POSITION, ground_clearance  # noqa: E402
+from gait_lib import (  # noqa: E402
+    ADDR_PRESENT_POSITION, ground_clearance, tripod_gap,
+)
 from stand import LOADED_TOLERANCE, clamp, move_group, pose_counts  # noqa: E402
 
 DEFAULT_STRIDE = 50.0    # mm of body travel per step. Bigger covers
@@ -419,10 +421,19 @@ def main():
             90: "LEFT", 270: "RIGHT"}.get(args.heading % 360,
                                           f"on heading {args.heading:g}°")
     print(f"CRABORA walk -- {args.distance:g} mm {name}")
-    print(f"  standing at {args.height:g} mm deck (model) = "
-          f"{ground_clearance(args.height):.0f} mm real gap under the femur "
-          f"caps;")
+    gap = ground_clearance(args.height)
+    walking_gap = tripod_gap(args.height)
+    print(f"  standing at {args.height:g} mm deck (model) = {gap:.0f} mm under "
+          f"the femur caps,")
+    print(f"  dropping to about {walking_gap:.0f} mm while a tripod is lifted;")
     print(f"  feet planted {p['r_foot']:.0f} mm from the body centre")
+    if walking_gap < 35:
+        print(f"\n  ⚠ ONLY {walking_gap:.0f} mm UNDER THE CAPS WHILE WALKING.")
+        print(f"    The femur caps are the lowest thing on the robot and the")
+        print(f"    kinematics does not model them, so the feet can clear")
+        print(f"    perfectly while the chassis scrapes -- which reads as")
+        print(f"    'it drags its legs'. Try --height 100 for "
+              f"{tripod_gap(100):.0f} mm.")
     print(f"  {p['n_steps']} step(s) x {p['per_step']:.0f} mm = "
           f"{args.distance:g} mm")
     print(f"  each sweep moves the body +/-{p['half']:.0f} mm about the "
