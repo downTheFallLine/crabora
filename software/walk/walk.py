@@ -59,6 +59,7 @@ from gait_lib import (  # noqa: E402
 from pose import (  # noqa: E402
     Unreachable, leg_fk, leg_ik, pose_stand, stand_height_range,
 )
+from gait_lib import ADDR_PRESENT_POSITION  # noqa: E402
 from stand import LOADED_TOLERANCE, clamp, move_group, pose_counts  # noqa: E402
 
 DEFAULT_STRIDE = 50.0    # mm of body travel per step. Bigger covers
@@ -210,9 +211,42 @@ def measure_stance(packet, joints, legs):
 # =============================================================
 # THE WALK
 # =============================================================
+def swing_clearance(packet, joints, swing, stance):
+    """How far the swing feet are off the floor, measured, mid-gait.
+
+    test_07 proved a tripod lifts 64 mm when the robot is standing still.
+    That is not the same as it lifting during a walk, where the stance
+    legs are moving under load at the same time. This is the same
+    measurement taken in the real context, which is the only place the
+    dragging actually happens.
+    """
+    from gait_lib import CENTER_POSITION, delta_degrees
+    def pose_of(leg):
+        out = {}
+        for dg, name in JOINTS:
+            sid, port = joints[dg][leg]
+            out[name] = read2(packet, port, sid, ADDR_PRESENT_POSITION,
+                              "position")
+        return (-delta_degrees(out["femur"] - CENTER_POSITION),
+                -delta_degrees(out["tibia"] - CENTER_POSITION))
+
+    floors = []
+    for leg in stance:
+        f, t = pose_of(leg)
+        floors.append(leg_fk(f, t)[1] - COXA_VERTICAL)
+    if not floors:
+        return {}
+    body = sum(floors) / len(floors)
+    out = {}
+    for leg in swing:
+        f, t = pose_of(leg)
+        out[leg] = body - (leg_fk(f, t)[1] - COXA_VERTICAL)
+    return out
+
+
 def run_walk(packet, joints, legs, limits, base, *, half, per_step, n_steps,
              height, r_foot, heading, lift, speed, substeps,
-             should_cancel=None, log=print):
+             should_cancel=None, log=print, instrument=False):
     """Setup, alternating tripods, then back to a neutral stance.
 
     Structured exactly like turn.run_turn, including the cancellation
@@ -263,6 +297,13 @@ def run_walk(packet, joints, legs, limits, base, *, half, per_step, n_steps,
         for k in send(frame):
             trouble.setdefault(k[0], set()).add("lift")
         log(" lift", end="", flush=True)
+        if instrument:
+            clr = swing_clearance(packet, joints,
+                                  [l for l in legs if l in swing],
+                                  [l for l in legs if l in stance])
+            log("\n      after LIFT  clearance: " +
+                ", ".join(f"leg {l} {c:+.0f}mm" for l, c in sorted(clr.items())),
+                end="", flush=True)
 
         # SWEEP: walk the body along in interpolated points. At each one
         # the stance legs are re-solved to hold their feet on the SAME
@@ -289,6 +330,13 @@ def run_walk(packet, joints, legs, limits, base, *, half, per_step, n_steps,
         landed = {l: (stance_pose(l, +half, height, r_foot, heading)
                       if l in stance else reset[l])
                   for l in legs}
+        if instrument:
+            clr = swing_clearance(packet, joints,
+                                  [l for l in legs if l in swing],
+                                  [l for l in legs if l in stance])
+            log("\n      after SWEEP clearance: " +
+                ", ".join(f"leg {l} {c:+.0f}mm" for l, c in sorted(clr.items())),
+                end="", flush=True)
         for k in send(landed):
             trouble.setdefault(k[0], set()).add("plant")
         travelled += per_step
@@ -331,6 +379,8 @@ def main():
     ap.add_argument("--legs", type=int, nargs="+", default=list(ALL_LEGS))
     ap.add_argument("--no-pause", dest="pause", action="store_false",
                     help="do not ask before moving")
+    ap.add_argument("--instrument", action="store_true",
+                    help="measure swing-foot clearance at each phase")
     ap.add_argument("--force", action="store_true",
                     help="walk even if the measured stance is too low")
     ap.add_argument("--dry-run", action="store_true",
@@ -468,7 +518,8 @@ def main():
             packet, joints, legs, limits, p["base"],
             half=p["half"], per_step=p["per_step"], n_steps=p["n_steps"],
             height=args.height, r_foot=p["r_foot"], heading=args.heading,
-            lift=args.lift, speed=args.speed, substeps=args.substeps)
+            lift=args.lift, speed=args.speed, substeps=args.substeps,
+            instrument=args.instrument)
 
         if outcome["trouble"]:
             print()

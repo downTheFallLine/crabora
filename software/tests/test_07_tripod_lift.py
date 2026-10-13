@@ -51,7 +51,7 @@ from gait_lib import (  # noqa: E402
     ADDR_GOAL_POSITION, ADDR_GOAL_SPEED, ADDR_PRESENT_POSITION,
     ADDR_TORQUE_ENABLE,
     BusError, PacketHandler, bus_stats, confirm, delta_degrees,
-    find_joints, find_urt_devices, open_ports, read2, reset_bus_stats,
+    find_joints, find_urt_devices, open_ports, read1, read2, reset_bus_stats,
     to_counts, write1, write2,
 )
 from pose import leg_fk  # noqa: E402
@@ -81,7 +81,10 @@ def read_volts(packet, joints, legs):
     for leg in legs:
         sid, port = joints[FEMUR_JOINT_DIGIT][leg]
         try:
-            v = read2(packet, port, sid, ADDR_PRESENT_VOLTAGE, "voltage") / 10.0
+            # read1: supply voltage is a ONE-byte register. read2 picks
+            # up the neighbouring byte as the high half and reports
+            # hundreds of volts.
+            v = read1(packet, port, sid, ADDR_PRESENT_VOLTAGE, "voltage") / 10.0
         except BusError:
             continue
         lo = v if lo is None else min(lo, v)
