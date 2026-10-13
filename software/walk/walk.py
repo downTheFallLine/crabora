@@ -59,7 +59,7 @@ from gait_lib import (  # noqa: E402
 from pose import (  # noqa: E402
     Unreachable, leg_fk, leg_ik, pose_stand, stand_height_range,
 )
-from gait_lib import ADDR_PRESENT_POSITION  # noqa: E402
+from gait_lib import ADDR_PRESENT_POSITION, ground_clearance  # noqa: E402
 from stand import LOADED_TOLERANCE, clamp, move_group, pose_counts  # noqa: E402
 
 DEFAULT_STRIDE = 50.0    # mm of body travel per step. Bigger covers
@@ -419,8 +419,10 @@ def main():
             90: "LEFT", 270: "RIGHT"}.get(args.heading % 360,
                                           f"on heading {args.heading:g}°")
     print(f"CRABORA walk -- {args.distance:g} mm {name}")
-    print(f"  standing at {args.height:g} mm; feet planted "
-          f"{p['r_foot']:.0f} mm from the body centre")
+    print(f"  standing at {args.height:g} mm deck (model) = "
+          f"{ground_clearance(args.height):.0f} mm real gap under the femur "
+          f"caps;")
+    print(f"  feet planted {p['r_foot']:.0f} mm from the body centre")
     print(f"  {p['n_steps']} step(s) x {p['per_step']:.0f} mm = "
           f"{args.distance:g} mm")
     print(f"  each sweep moves the body +/-{p['half']:.0f} mm about the "
@@ -490,7 +492,9 @@ def main():
             lo = min(measured.values())
             hi = max(measured.values())
             print(f"\n  measured stance: {lo:.0f}..{hi:.0f} mm deck "
-                  f"clearance (commanded {args.height:g})")
+                  f"(commanded {args.height:g}), i.e. "
+                  f"{ground_clearance(lo):.0f}..{ground_clearance(hi):.0f} mm "
+                  f"of real gap under the caps")
             for leg in sorted(measured):
                 if abs(measured[leg] - args.height) > 25.0:
                     print(f"    leg {leg} ({LEG_NAME[leg]}): "

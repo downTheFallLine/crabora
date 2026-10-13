@@ -147,6 +147,17 @@ COXA_RADIAL   = 58.0         # outboard, along the leg's bearing
 COXA_TANGENT  = 21.0         # sideways, along the femur horn axis
 COXA_VERTICAL = 17.6         # up, above the pan disc bottom
 
+# The femur caps hang BELOW the deck plate, so the robot's real ground
+# clearance is less than the deck height every pose calculation reports.
+# Nothing in the kinematics knows about them: leg_fk measures to the
+# femur AXIS, and the cap is a lump of plastic underneath it.
+#
+# MEASURED 2026-10-13: 52 mm under the caps while the model reported 73 mm
+# of deck clearance. So the lowest hardware sits about this far below the
+# number the geometry quotes, and it is the cap, not the deck, that hits
+# the floor first.
+CAP_DROP_BELOW_DECK = 21.0
+
 FEMUR_LEN = 100.0            # femur axis -> tibia axis
 TIBIA_LEN = 120.0            # tibia axis -> foot tip
 
@@ -190,6 +201,17 @@ def delta_degrees(counts):
     value rather than obviously broken.
     """
     return counts * 360.0 / COUNTS_PER_REV
+
+
+def ground_clearance(deck_height):
+    """Real gap under the robot, given a deck height from the pose model.
+
+    Use this wherever a height is shown to a person. The pose model's
+    own figure is a kinematic quantity measured to the femur axis, not a
+    gap you could slide a ruler into, and quoting it as though it were
+    one is how 73 mm turned out to be 52.
+    """
+    return deck_height - CAP_DROP_BELOW_DECK
 
 
 def forward_sign(leg, invert=False):
