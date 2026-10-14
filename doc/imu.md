@@ -231,6 +231,39 @@ whether the body is dropping evenly or tilting.
 
 ---
 
+## The bracket
+
+`imu/design_imu_bracket.py` generates a C-section sled: a base that glues
+flat to the deck, a web setting the wiring clearance, and a top plate the
+board bolts to. The open side faces forward so a nut can be started on a
+bolt dropped through the top plate, and so the wiring leaves underneath
+without being pinched.
+
+```bash
+python imu/design_imu_bracket.py
+python imu/design_imu_bracket.py --height 40 --nut-trap
+python imu/design_imu_bracket.py --summary        # dimensions, no STL
+```
+
+As built: 35 mm gap, M3 holes 14.5 mm apart (from 17.5 mm measured
+outside-to-outside on a 20 x 16 mm board), 41 mm overall.
+
+**The engraved arrow is the important part.** Two bolt holes cannot key
+rotation -- the board fits perfectly mounted 180 degrees out, +X aft
+instead of forward, and nothing looks wrong. The sensor answers, the
+test passes if you run it after mounting it backwards, and every heading
+is inverted. Point the arrow at the hexagon vertex between legs 1 and 6.
+
+The web is 6 mm, which puts the first bending mode near 450 Hz. A foot
+plant rings the structure at roughly 50-200 Hz, so the mount stays clear
+of it -- a bracket that resonates reports its own wobble as body motion,
+which is the one thing this sensor must not do. Dropping the web to 4 mm
+would put it at ~310 Hz, which is closer than it needs to be.
+
+Print base-down, no supports.
+
+---
+
 ## Troubleshooting
 
 | symptom | likely cause |
