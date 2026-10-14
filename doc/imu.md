@@ -229,6 +229,23 @@ catch it was a ruler and an eye.
 Pitch and roll during a tripod lift answer that directly, and tell you
 whether the body is dropping evenly or tilting.
 
+`tests/test_07_tripod_lift.py` does this: it samples attitude with the
+robot standing, lifts one tripod, samples again, and reports the tilt
+plus what it costs at the feet. Useful anchor: **1 degree of tilt is
+6 mm at a foot 341 mm from the body centre**, so the 13 mm of sag
+measured with a ruler would be about 2.2 degrees if it were pure lean.
+
+**An accelerometer measures tilt, not height.** A body that sinks evenly
+on all three stance legs produces no tilt and the test reads zero --
+which is why it still asks you to look, and why the ruler has not
+retired. What the IMU catches is the asymmetric part, the body leaning
+toward the side that just came up, which is the part that costs the
+swing feet their clearance soonest.
+
+It also reports mean |g| either side of the lift. Roll and pitch only
+mean anything when gravity is the sole force, so a figure far from 1.000
+says the robot was still moving and the tilt should not be believed.
+
 ---
 
 ## The bracket

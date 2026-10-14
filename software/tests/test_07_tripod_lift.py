@@ -18,6 +18,17 @@ assumptions back to you. An eye on the actual robot cannot.
 
 So: lift one tripod, ask, put it back down.
 
+WITH AN IMU ATTACHED it also measures the body's ATTITUDE either side of
+the lift. This matters because the encoders cannot see it: a joint
+reports arriving at its commanded angle while the chassis sits lower
+than the model believes, through flex, backlash and feet sliding.
+
+One limitation, stated plainly: an accelerometer measures TILT, not
+height. A body that sinks evenly on all three stance legs produces no
+tilt and this will read zero. What it catches is the ASYMMETRIC part --
+the body leaning toward the side that just came up -- which is the part
+that costs the swing feet their clearance soonest.
+
 SAFETY: the robot must already be standing. Nothing walks or translates,
 and the tripod goes back where it came from whatever the answer.
 
@@ -47,6 +58,16 @@ from gait_lib import (  # noqa: E402
     ground_clearance, reset_bus_stats, to_counts, write1, write2,
 )
 from pose import leg_fk  # noqa: E402
+
+# The IMU is optional. It is a measurement, not a dependency: the test
+# did useful work before it existed and must keep doing so without it.
+try:
+    from imu_lib import Imu, ImuError
+except Exception:                                      # noqa: BLE001
+    Imu = None
+
+    class ImuError(Exception):
+        pass
 
 ADDR_PRESENT_VOLTAGE = 62
 
@@ -92,6 +113,72 @@ def read_volts(packet, joints, legs):
     return lo
 
 
+def attitude(imu, seconds=0.6):
+    """Mean roll and pitch over a short window, in degrees.
+
+    Averaged rather than sampled once: a single reading catches whatever
+    the robot was doing at that instant. Also returns the mean |g|, which
+    is the honesty check -- roll and pitch are only meaningful when
+    gravity is the only force acting, so a figure far from 1.0 means the
+    robot was still moving and the tilt should not be believed.
+
+    No gyro involved, so this needs no zeroing: tilt comes from the
+    accelerometer alone.
+    """
+    if imu is None:
+        return None
+    rolls, pitches, gs = [], [], []
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        try:
+            r = imu.read()
+        except ImuError:
+            break
+        rolls.append(r.roll_deg)
+        pitches.append(r.pitch_deg)
+        gs.append(r.g_total)
+        time.sleep(0.01)
+    if not rolls:
+        return None
+    n = len(rolls)
+    return {"roll": sum(rolls) / n, "pitch": sum(pitches) / n,
+            "g": sum(gs) / n, "n": n}
+
+
+def report_tilt(before, after, r_foot):
+    """What the attitude change means, in millimetres at the feet."""
+    if not before or not after:
+        return
+    d_roll = after["roll"] - before["roll"]
+    d_pitch = after["pitch"] - before["pitch"]
+    tilt = math.hypot(d_roll, d_pitch)
+    # Direction in the body frame: roll is about +X (forward), pitch
+    # about +Y (left), so a lean shows up as a bearing from the nose.
+    bearing = math.degrees(math.atan2(d_roll, d_pitch))
+    drop = r_foot * math.sin(math.radians(tilt))
+
+    print(f"\n  === BODY ATTITUDE (IMU) ===")
+    print(f"  {'':<10} {'roll':>9} {'pitch':>9} {'|g|':>7}")
+    print(f"  {'standing':<10} {before['roll']:>+8.2f}° {before['pitch']:>+8.2f}° "
+          f"{before['g']:>6.3f}")
+    print(f"  {'tripod up':<10} {after['roll']:>+8.2f}° {after['pitch']:>+8.2f}° "
+          f"{after['g']:>6.3f}")
+    print(f"  {'change':<10} {d_roll:>+8.2f}° {d_pitch:>+8.2f}°")
+    print(f"\n  tilted {tilt:.2f}° toward bearing {bearing:+.0f}° "
+          f"(0 = nose, +90 = left)")
+    print(f"  -> a foot {r_foot:.0f} mm out on the low side sits "
+          f"{drop:.0f} mm lower than before")
+
+    for v, label in ((before["g"], "standing"), (after["g"], "tripod up")):
+        if abs(v - 1.0) > 0.08:
+            print(f"  ⚠ |g| was {v:.3f} while {label} -- the robot was still "
+                  f"moving, so that tilt is not trustworthy")
+    if tilt < 0.3:
+        print(f"  The body barely tilted. Either the stance legs are holding")
+        print(f"  well, or it sank EVENLY -- which an accelerometer cannot")
+        print(f"  see. Use the ruler to tell those two apart.")
+
+
 def set_femurs(packet, joints, legs, want, speed):
     """Drive these legs' femurs to want[leg], in pose degrees."""
     for leg in legs:
@@ -122,6 +209,10 @@ def main():
     ap.add_argument("--speed", type=int, default=200)
     ap.add_argument("--settle", type=float, default=1.5,
                     help="seconds to settle before asking")
+    ap.add_argument("--no-imu", dest="imu", action="store_false",
+                    help="skip the body-attitude measurement")
+    ap.add_argument("--imu-address", type=lambda v: int(v, 0), default=0x68,
+                    help="I2C address of the IMU (default 0x68)")
     ap.add_argument("--ports", nargs="+")
     args = ap.parse_args()
 
@@ -131,6 +222,18 @@ def main():
     print("Crabora bring-up test 7: lift a tripod and look at it\n")
     print("  The robot must ALREADY BE STANDING.")
     print("  One tripod comes up, you say whether it cleared, it goes back.\n")
+
+    imu = None
+    if args.imu and Imu is not None:
+        try:
+            imu = Imu(address=args.imu_address).open()
+            print("  IMU: open")
+        except Exception as e:                          # noqa: BLE001
+            print(f"  IMU: unavailable ({type(e).__name__}: {e})")
+            print("       continuing without it -- the lift test still works")
+            imu = None
+    elif args.imu:
+        print("  IMU: imu_lib not importable, continuing without it")
 
     devices = args.ports or find_urt_devices()
     if not devices:
@@ -183,6 +286,7 @@ def main():
             time.sleep(args.settle)
 
             after = {l: read_pose(packet, joints, l) for l in legs}
+            att_after = attitude(imu)
             v_now = read_volts(packet, joints, legs)
             floor = sum(body_height(after[l]) for l in stance) / len(stance)
             computed = {l: floor - body_height(after[l]) for l in swing}
@@ -195,6 +299,9 @@ def main():
                       f"{computed[l]:>15.0f} mm")
             if v_before and v_now:
                 print(f"  supply {v_before:.1f} V -> {v_now:.1f} V")
+            # r_foot: the stance feet are roughly this far from the body
+            # centre, which is the lever the tilt acts through.
+            report_tilt(att_before, att_after, 341.0)
 
             print()
             observed = ask(f"LOOK AT THE ROBOT. Are legs "
@@ -269,6 +376,11 @@ def main():
         print(f"\nBus error: {e}")
         return 1
     finally:
+        if imu is not None:
+            try:
+                imu.close()
+            except Exception:                           # noqa: BLE001
+                pass
         for port in ports.values():
             port.closePort()
 
