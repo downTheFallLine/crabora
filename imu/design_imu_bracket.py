@@ -93,6 +93,7 @@ MARGIN = 2.5          # plate material beyond the board footprint
 M3_CLEAR = 3.4        # clearance for an M3 bolt
 M3_NUT_AF = 6.2       # M3 nut across flats, plus a little
 M3_NUT_H = 2.6        # M3 nut thickness, plus a little
+MIN_OVER_NUT = 2.0    # material that must remain above a trapped nut
 FILLET = 1.2          # web-to-plate fillet leg, mm
 ARROW_DEPTH = 0.6     # engraving depth
 ARROW_LEN = 7.0
@@ -123,13 +124,19 @@ def arrow_prism(length, width, depth):
 
 
 def build(board_l, board_w, hole_spacing, c_height, nut_trap):
+    # A nut pocket 2.6 mm deep in a 3 mm plate leaves 0.4 mm of PLA
+    # carrying the entire clamp load, which crushes on first tightening.
+    # So the plate grows to suit when a trap is asked for.
+    top_thk = TOP_THK if not nut_trap else M3_NUT_H + MIN_OVER_NUT
     # web + margin + board + gap + arrow + margin. The web thickness
     # has to be in here: the board starts AFTER the web, not after the
     # margin, and leaving it out ran the arrow off the front edge.
     ARROW_GAP = 2.0
     top_l = (WEB_THK + MARGIN + board_l + ARROW_GAP
              + ARROW_LEN + MARGIN)
-    top_w = board_w + 2 * MARGIN
+    # Wide enough for the board OR the bolt span, whichever needs more.
+    top_w = max(board_w + 2 * MARGIN,
+                hole_spacing + M3_CLEAR + 2 * MARGIN)
     # A tall bracket levers on its glue joint, so the base is kept
     # long: the taller the web, the more the moment tries to peel it.
     base_l = max(top_l * 0.75, c_height * 0.9)
@@ -149,8 +156,8 @@ def build(board_l, board_w, hole_spacing, c_height, nut_trap):
     parts.append(web)
 
     # --- TOP: cantilevered forward over the open side -------------
-    top = creation.box(extents=(top_l, top_w, TOP_THK))
-    top.apply_translation((top_l / 2, 0, web_h + TOP_THK / 2))
+    top = creation.box(extents=(top_l, top_w, top_thk))
+    top.apply_translation((top_l / 2, 0, web_h + top_thk / 2))
     parts.append(top)
 
     # --- fillets at both web joints -------------------------------
@@ -169,29 +176,29 @@ def build(board_l, board_w, hole_spacing, c_height, nut_trap):
     # --- bolt holes through the top plate -------------------------
     board_cx = WEB_THK + MARGIN + board_l / 2
     cuts = []
-    for dx in (-hole_spacing / 2, hole_spacing / 2):
-        h = creation.cylinder(radius=M3_CLEAR / 2, height=TOP_THK * 3)
-        h.apply_translation((board_cx + dx, 0.0, web_h + TOP_THK / 2))
+    for dy in (-hole_spacing / 2, hole_spacing / 2):
+        h = creation.cylinder(radius=M3_CLEAR / 2, height=top_thk * 3)
+        h.apply_translation((board_cx, dy, web_h + top_thk / 2))
         cuts.append(h)
         if nut_trap:
             # Hex pocket in the UNDERSIDE, so the nut is captive and you
             # only need one spanner. Open side still lets you drop it in.
             nut = creation.cylinder(radius=M3_NUT_AF / math.sqrt(3),
                                     height=M3_NUT_H, sections=6)
-            nut.apply_translation((board_cx + dx, 0.0, web_h + M3_NUT_H / 2))
+            nut.apply_translation((board_cx, dy, web_h + M3_NUT_H / 2))
             cuts.append(nut)
 
     # --- the arrow, forward of the board footprint ----------------
     arrow = arrow_prism(ARROW_LEN, top_w * 0.5, ARROW_DEPTH * 3)
     arrow.apply_translation(
         (WEB_THK + MARGIN + board_l + ARROW_GAP, 0,
-         web_h + TOP_THK - ARROW_DEPTH))
+         web_h + top_thk - ARROW_DEPTH))
     cuts.append(arrow)
 
     solid = trimesh.boolean.difference([solid] + cuts)
     return solid, dict(top_l=top_l, top_w=top_w, base_l=base_l,
                        base_w=base_w, web_h=web_h, board_cx=board_cx,
-                       overall_h=web_h + TOP_THK)
+                       overall_h=web_h + top_thk, top_thk=top_thk)
 
 
 def preview(solid, path, title):
@@ -258,7 +265,9 @@ def main():
           + (", with nut trap" if args.nut_trap else ""))
     print(f"  wiring gap       {args.height:g} mm")
     print()
-    print(f"  top plate        {d['top_l']:.1f} x {d['top_w']:.1f} x {TOP_THK:g} mm")
+    print(f"  top plate        {d['top_l']:.1f} x {d['top_w']:.1f} x "
+          f"{d['top_thk']:g} mm"
+          + (f"  (thickened for the nut trap)" if args.nut_trap else ""))
     print(f"  base plate       {d['base_l']:.1f} x {d['base_w']:.1f} x {BASE_THK:g} mm")
     print(f"  web              {WEB_THK:g} mm thick, {d['web_h']:.1f} mm tall")
     print(f"  overall height   {d['overall_h']:.1f} mm")

@@ -246,7 +246,13 @@ python imu/design_imu_bracket.py --summary        # dimensions, no STL
 ```
 
 As built: 35 mm gap, M3 holes 14.5 mm apart (from 17.5 mm measured
-outside-to-outside on a 20 x 16 mm board), 41 mm overall.
+outside-to-outside on a 20 x 16 mm board), running ACROSS the plate so
+the board's long axis sits athwart the robot. 41 mm overall.
+
+`--nut-trap` adds a hex pocket under the top plate and thickens that
+plate to 4.6 mm to suit. It has to: a 2.6 mm pocket in a 3 mm plate
+leaves 0.4 mm of PLA carrying the entire clamp load, which crushes on
+first tightening.
 
 **The engraved arrow is the important part.** Two bolt holes cannot key
 rotation -- the board fits perfectly mounted 180 degrees out, +X aft
