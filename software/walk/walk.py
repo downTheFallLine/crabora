@@ -48,7 +48,7 @@ sys.path.insert(0, _HERE)
 sys.path.insert(0, os.path.join(os.path.dirname(_HERE), "stand"))
 
 from gait_lib import (  # noqa: E402
-    warn_if_service_running,
+    require_bus_free,
     ALL_LEGS, BODY_TO_COXA_AXIS, COXA_JOINT_DIGIT, COXA_RADIAL,
     COXA_VERTICAL, FEMUR_JOINT_DIGIT, LEG_BEARING, LEG_NAME,
     TIBIA_JOINT_DIGIT, TRIPOD_A, TRIPOD_B,
@@ -476,7 +476,8 @@ def main():
     if not devices:
         print("No FE-URT-2 boards found.")
         return 1
-    warn_if_service_running()
+    if require_bus_free(getattr(args, 'force', False)):
+        return 1
     ports = open_ports(devices)
     if not ports:
         print("No URT could be opened.")

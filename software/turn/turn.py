@@ -58,7 +58,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(_HERE), "walk"))
 sys.path.insert(0, os.path.join(os.path.dirname(_HERE), "stand"))
 
 from gait_lib import (  # noqa: E402
-    warn_if_service_running,
+    require_bus_free,
     ALL_LEGS, BODY_TO_COXA_AXIS, COXA_JOINT_DIGIT, COXA_RADIAL,
     COXA_VERTICAL, FEMUR_JOINT_DIGIT, LEG_BEARING, LEG_NAME,
     TIBIA_JOINT_DIGIT, TRIPOD_A, TRIPOD_B,
@@ -284,6 +284,8 @@ def main():
     ap.add_argument("--legs", type=int, nargs="+", default=list(ALL_LEGS))
     ap.add_argument("--no-pause", dest="pause", action="store_false")
     ap.add_argument("--dry-run", action="store_true")
+    ap.add_argument("--force", action="store_true",
+                    help="run even if the agentix service holds the bus")
     ap.add_argument("--ports", nargs="+")
     args = ap.parse_args()
 
@@ -354,7 +356,8 @@ def main():
     if not devices:
         print("No FE-URT-2 boards found.")
         return 1
-    warn_if_service_running()
+    if require_bus_free(getattr(args, 'force', False)):
+        return 1
     ports = open_ports(devices)
     if not ports:
         print("No URT could be opened.")

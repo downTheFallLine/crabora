@@ -128,8 +128,17 @@ restart   sudo systemctl restart crabora-agentix
 disable   sudo systemctl disable --now crabora-agentix
 ```
 
-**Stop the service before running a gait program by hand.** Both want
-the same serial ports and the loser gets a confusing permission error.
+**Stop the service before running a gait program by hand.** They cannot
+share the bus, and the gait programs now *refuse to start* while it is
+up rather than warning and continuing.
+
+The confusing part, worth stating once: **the service holds the serial
+ports whether or not the chat agent is enabled.** The arbiter opens all
+three URTs at startup and keeps them open — that is what makes the UI
+answer quickly. So a UI showing "no agent" because no API key is set is
+still a process that owns the bus. "The agent is not running" and "the
+service is not running" are different statements, and only the second
+one frees the ports.
 
 Tool failures are handed back to the model as observations rather than
 raised — it can usually recover, and "leg 3 isn't answering" is a better

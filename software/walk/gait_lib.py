@@ -395,16 +395,43 @@ def service_holds_bus():
         return False
 
 
-def warn_if_service_running():
-    """Print a warning if the service has the bus. Returns True if it does."""
+def require_bus_free(force=False):
+    """REFUSE to continue while the agentix service holds the ports.
+
+    This used to be a warning you could answer past, and it was answered
+    past three times running -- every time producing a corrupted move and
+    a robot left part-way through a sequence. A warning that is always
+    ignored and always followed by failure should not be a warning.
+
+    Worth being explicit about, because it is genuinely confusing: the
+    SERVICE holds the serial ports whether or not the chat agent is
+    enabled. The arbiter opens all three URTs at startup and keeps them
+    open -- that is what makes the UI answer quickly. So a UI showing
+    "no agent" because there is no API key is still a process that owns
+    the bus. "The agent is not running" and "the service is not running"
+    are different statements.
+
+    Returns True if it stopped the caller; the caller should exit.
+    """
     if not service_holds_bus():
         return False
-    print(f"\n  ⚠ {AGENTIX_SERVICE} IS RUNNING and holds the servo ports.")
-    print(f"    Two readers on a half-duplex bus interleave their packets,")
-    print(f"    and the loser gets 'device reports readiness to read but")
-    print(f"    returned no data' partway through a move. Stop it first:")
+    print(f"\n  REFUSING TO START: {AGENTIX_SERVICE} is running and holds "
+          f"the servo ports.")
+    print()
+    print(f"    This is true even if the web UI says \"no agent\" -- the")
+    print(f"    service opens the bus at startup and keeps it open, with or")
+    print(f"    without an API key. Two readers on a half-duplex bus")
+    print(f"    interleave their packets and the loser fails partway through")
+    print(f"    a move, which is how a robot gets left mid-sequence.")
+    print()
     print(f"        sudo systemctl stop {AGENTIX_SERVICE}")
-    print(f"    and start it again when you are done.\n")
+    print(f"        <run this program>")
+    print(f"        sudo systemctl start {AGENTIX_SERVICE}")
+    print()
+    if force:
+        print("  --force given: continuing anyway. Expect bus errors.\n")
+        return False
+    print("  (--force overrides this, but it has never once worked.)\n")
     return True
 
 
