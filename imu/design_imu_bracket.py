@@ -16,19 +16,19 @@ through the top plate and the IMU's wiring can leave underneath without
 being pinched. The web is at the back for the same reason: nothing to
 reach past when fitting it.
 
-WHY THE ARROW MATTERS MORE THAN THE BRACKET
+ORIENTATION IS STILL ON YOU
 
-Two bolt holes cannot key rotation. The board will fit perfectly
-mounted 180 degrees out, +X pointing aft instead of forward, and
-NOTHING WILL LOOK WRONG. The sensor answers, the test passes if you run
-it after mounting it backwards, and every heading the robot computes is
-inverted.
+Two bolt holes cannot key rotation. The board fits perfectly mounted
+180 degrees out, +X pointing aft instead of forward, and nothing looks
+wrong -- the sensor answers and the orientation test passes if it is run
+after mounting it backwards. There is no feature on the bracket that
+prevents this, so check it against the body frame when you fit it:
 
-So the top plate carries an engraved arrow, forward of the board
-footprint where the PCB cannot hide it. Point it at the hexagon vertex
-between legs 1 and 6 and the body frame is right:
+    +X forward, out through the point between legs 1 and 6
+    +Y left   +Z up
 
-    +X forward   +Y left   +Z up
+tests/test_06_imu.py verifies it against gravity and says which way a
+rotated mount is out.
 
 MOUNTING
 
@@ -94,9 +94,8 @@ M3_CLEAR = 3.4        # clearance for an M3 bolt
 M3_NUT_AF = 6.2       # M3 nut across flats, plus a little
 M3_NUT_H = 2.6        # M3 nut thickness, plus a little
 MIN_OVER_NUT = 2.0    # material that must remain above a trapped nut
+FRONT_OVERHANG = 6.0  # plate beyond the bolt centres, toward the front
 FILLET = 1.2          # web-to-plate fillet leg, mm
-ARROW_DEPTH = 0.6     # engraving depth
-ARROW_LEN = 7.0
 
 
 def rounded_fillet(size_x, size_y, leg):
@@ -106,34 +105,17 @@ def rounded_fillet(size_x, size_y, leg):
         vertices=tri, faces=np.array([[0, 1, 2]]), height=size_y)
 
 
-def arrow_prism(length, width, depth):
-    """A flat arrow pointing +X, as a solid to subtract."""
-    head = length * 0.45
-    shaft_w = width * 0.34
-    pts = np.array([
-        [length, 0.0],
-        [length - head,  width / 2],
-        [length - head,  shaft_w / 2],
-        [0.0,            shaft_w / 2],
-        [0.0,           -shaft_w / 2],
-        [length - head, -shaft_w / 2],
-        [length - head, -width / 2],
-    ])
-    poly = trimesh.path.polygons.Polygon(pts)
-    return creation.extrude_polygon(poly, height=depth)
-
-
 def build(board_l, board_w, hole_spacing, c_height, nut_trap):
     # A nut pocket 2.6 mm deep in a 3 mm plate leaves 0.4 mm of PLA
     # carrying the entire clamp load, which crushes on first tightening.
     # So the plate grows to suit when a trap is asked for.
     top_thk = TOP_THK if not nut_trap else M3_NUT_H + MIN_OVER_NUT
-    # web + margin + board + gap + arrow + margin. The web thickness
-    # has to be in here: the board starts AFTER the web, not after the
-    # margin, and leaving it out ran the arrow off the front edge.
-    ARROW_GAP = 2.0
-    top_l = (WEB_THK + MARGIN + board_l + ARROW_GAP
-             + ARROW_LEN + MARGIN)
+    # The plate stops just past the bolts rather than carrying the whole
+    # board: the board is held at its holes, and plate beyond them is
+    # only mass on the end of a 35 mm cantilever. The PCB overhangs the
+    # front, which is fine -- nothing bears on it.
+    board_cx = WEB_THK + MARGIN + board_l / 2
+    top_l = board_cx + FRONT_OVERHANG
     # Wide enough for the board OR the bolt span, whichever needs more.
     top_w = max(board_w + 2 * MARGIN,
                 hole_spacing + M3_CLEAR + 2 * MARGIN)
@@ -174,7 +156,6 @@ def build(board_l, board_w, hole_spacing, c_height, nut_trap):
     solid = trimesh.boolean.union(parts)
 
     # --- bolt holes through the top plate -------------------------
-    board_cx = WEB_THK + MARGIN + board_l / 2
     cuts = []
     for dy in (-hole_spacing / 2, hole_spacing / 2):
         h = creation.cylinder(radius=M3_CLEAR / 2, height=top_thk * 3)
@@ -188,13 +169,6 @@ def build(board_l, board_w, hole_spacing, c_height, nut_trap):
             nut.apply_translation((board_cx, dy, web_h + M3_NUT_H / 2))
             cuts.append(nut)
 
-    # --- the arrow, forward of the board footprint ----------------
-    arrow = arrow_prism(ARROW_LEN, top_w * 0.5, ARROW_DEPTH * 3)
-    arrow.apply_translation(
-        (WEB_THK + MARGIN + board_l + ARROW_GAP, 0,
-         web_h + top_thk - ARROW_DEPTH))
-    cuts.append(arrow)
-
     solid = trimesh.boolean.difference([solid] + cuts)
     return solid, dict(top_l=top_l, top_w=top_w, base_l=base_l,
                        base_w=base_w, web_h=web_h, board_cx=board_cx,
@@ -204,8 +178,8 @@ def build(board_l, board_w, hole_spacing, c_height, nut_trap):
 def preview(solid, path, title):
     """Multi-panel PNG beside the STL, as the other design scripts do.
 
-    Worth the few lines: a bracket that is subtly inside out or has the
-    arrow on the wrong face is obvious in a picture and invisible in a
+    Worth the few lines: a bracket that is subtly inside out, or has a
+    pocket on the wrong face, is obvious in a picture and invisible in a
     dimensions table.
     """
     import matplotlib
@@ -291,8 +265,9 @@ def main():
                         f"M3 at {args.hole_spacing:g} mm")
     print(f"\n  wrote {out}")
     print(f"  wrote {png}")
-    print("  Print base-down, no supports. Point the arrow FORWARD --")
-    print("  at the hexagon vertex between legs 1 and 6.")
+    print("  Print base-down, no supports.")
+    print("  Check the board's +X faces the point between legs 1 and 6 --")
+    print("  nothing on the bracket enforces it.")
     return 0
 
 
