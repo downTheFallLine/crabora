@@ -301,3 +301,54 @@ class Imu:
     def reset_heading(self, value=0.0):
         self.heading_deg = value
         self._last_t = None
+
+
+def attitude(imu, seconds=0.6):
+    """Mean roll and pitch over a short window, in degrees.
+
+    Averaged rather than sampled once: a single reading catches whatever
+    the robot happened to be doing at that instant.
+
+    Also returns the mean |g|, which is the honesty check. Roll and pitch
+    are only meaningful when gravity is the only force acting, so a
+    figure far from 1.0 means the robot was still moving and the tilt
+    should not be believed. A CONSTANT offset (the same |g| before and
+    after) is calibration rather than motion, and cancels in a
+    difference -- so a tilt CHANGE stays usable even uncalibrated.
+
+    Needs no gyro and no zeroing: tilt comes from the accelerometer
+    alone. Returns None if there is no IMU, so callers can treat the
+    sensor as optional without branching everywhere.
+    """
+    if imu is None:
+        return None
+    rolls, pitches, gs = [], [], []
+    end = time.monotonic() + seconds
+    while time.monotonic() < end:
+        try:
+            r = imu.read()
+        except ImuError:
+            break
+        rolls.append(r.roll_deg)
+        pitches.append(r.pitch_deg)
+        gs.append(r.g_total)
+        time.sleep(0.01)
+    if not rolls:
+        return None
+    n = len(rolls)
+    return {"roll": sum(rolls) / n, "pitch": sum(pitches) / n,
+            "g": sum(gs) / n, "n": n}
+
+
+def tilt_between(before, after):
+    """(magnitude, bearing) of the attitude change, in degrees.
+
+    Bearing is measured in the body frame: 0 is nose-down, +90 is
+    left-down. Returns None if either sample is missing.
+    """
+    if not before or not after:
+        return None
+    d_roll = after["roll"] - before["roll"]
+    d_pitch = after["pitch"] - before["pitch"]
+    return (math.hypot(d_roll, d_pitch),
+            math.degrees(math.atan2(d_roll, d_pitch)))

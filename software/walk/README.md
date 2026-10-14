@@ -321,6 +321,21 @@ python3 walk.py 200 --heading 180    # backwards
 python3 walk.py 400 --stride 150     # longer steps, fewer of them
 ```
 
+`--instrument` measures what actually happened, rather than what was
+commanded: swing-foot clearance after each LIFT and SWEEP, body tilt at
+the same points, and the heading change across the whole walk.
+
+That last one is the only thing the walk can measure that a static test
+cannot. A straight walk should end on the heading it started on; if it
+veers, that is **asymmetric slip** — one side gripping better than the
+other — and it is invisible by eye over 150 mm.
+
+The clearance figures are computed from joint angles, which makes them
+**body-relative**: they measure the swing foot against the stance feet,
+and when the body sinks, both move down together. The tilt reading is
+there to catch what they cannot. Note an accelerometer sees tilt but not
+uniform sink, so the two together still do not replace a ruler.
+
 `--dry-run` prints the per-leg coxa angles at both sweep extremes, which
 is where the asymmetry shows: walking forward, the **beam legs (2 and 5)
 sweep most** (±8.0° at a 25 mm half-stride) because they are

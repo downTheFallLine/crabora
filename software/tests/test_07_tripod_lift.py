@@ -63,12 +63,15 @@ from pose import leg_fk  # noqa: E402
 # The IMU is optional. It is a measurement, not a dependency: the test
 # did useful work before it existed and must keep doing so without it.
 try:
-    from imu_lib import Imu, ImuError
+    from imu_lib import Imu, ImuError, attitude
 except Exception:                                      # noqa: BLE001
     Imu = None
 
     class ImuError(Exception):
         pass
+
+    def attitude(_imu, seconds=0.6):
+        return None
 
 ADDR_PRESENT_VOLTAGE = 62
 
@@ -112,38 +115,6 @@ def read_volts(packet, joints, legs):
             continue
         lo = v if lo is None else min(lo, v)
     return lo
-
-
-def attitude(imu, seconds=0.6):
-    """Mean roll and pitch over a short window, in degrees.
-
-    Averaged rather than sampled once: a single reading catches whatever
-    the robot was doing at that instant. Also returns the mean |g|, which
-    is the honesty check -- roll and pitch are only meaningful when
-    gravity is the only force acting, so a figure far from 1.0 means the
-    robot was still moving and the tilt should not be believed.
-
-    No gyro involved, so this needs no zeroing: tilt comes from the
-    accelerometer alone.
-    """
-    if imu is None:
-        return None
-    rolls, pitches, gs = [], [], []
-    end = time.monotonic() + seconds
-    while time.monotonic() < end:
-        try:
-            r = imu.read()
-        except ImuError:
-            break
-        rolls.append(r.roll_deg)
-        pitches.append(r.pitch_deg)
-        gs.append(r.g_total)
-        time.sleep(0.01)
-    if not rolls:
-        return None
-    n = len(rolls)
-    return {"roll": sum(rolls) / n, "pitch": sum(pitches) / n,
-            "g": sum(gs) / n, "n": n}
 
 
 def report_tilt(before, after, r_foot):

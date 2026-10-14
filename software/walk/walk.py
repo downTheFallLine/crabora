@@ -63,6 +63,20 @@ from pose import (  # noqa: E402
 from gait_lib import (  # noqa: E402
     ADDR_PRESENT_POSITION, ground_clearance, tripod_gap,
 )
+
+# Optional: the walk works without it, but the joint angles are
+# body-relative and cannot see the body move. This is the only sensor
+# that can.
+try:
+    from imu_lib import Imu, attitude, tilt_between
+except Exception:                                      # noqa: BLE001
+    Imu = None
+
+    def attitude(_imu, seconds=0.6):
+        return None
+
+    def tilt_between(_a, _b):
+        return None
 from stand import LOADED_TOLERANCE, clamp, move_group, pose_counts  # noqa: E402
 
 DEFAULT_STRIDE = 50.0    # mm of body travel per step. Bigger covers
@@ -255,7 +269,7 @@ def swing_clearance(packet, joints, swing, stance):
 
 def run_walk(packet, joints, legs, limits, base, *, half, per_step, n_steps,
              height, r_foot, heading, lift, speed, substeps,
-             should_cancel=None, log=print, instrument=False):
+             should_cancel=None, log=print, instrument=False, imu=None):
     """Setup, alternating tripods, then back to a neutral stance.
 
     Structured exactly like turn.run_turn, including the cancellation
@@ -287,6 +301,17 @@ def run_walk(packet, joints, legs, limits, base, *, half, per_step, n_steps,
     start = {l: stance_pose(l, -half, height, r_foot, heading) for l in legs}
     send(start)
 
+    att0 = attitude(imu) if instrument else None
+    if att0:
+        log(f"      level before walking: roll {att0['roll']:+.2f}deg, "
+            f"pitch {att0['pitch']:+.2f}deg")
+        if imu is not None:
+            # The robot is standing still right here, so this is the one
+            # moment the heading can be honestly zeroed.
+            imu.mark_stationary()
+            imu.heading_deg = 0.0
+    worst_tilt = 0.0
+
     trouble = {}
     travelled = 0.0
     for i in range(1, n_steps + 1):
@@ -313,6 +338,10 @@ def run_walk(packet, joints, legs, limits, base, *, half, per_step, n_steps,
             log("\n      after LIFT  clearance: " +
                 ", ".join(f"leg {l} {c:+.0f}mm" for l, c in sorted(clr.items())),
                 end="", flush=True)
+            t = tilt_between(att0, attitude(imu))
+            if t:
+                worst_tilt = max(worst_tilt, t[0])
+                log(f"   tilt {t[0]:.2f}deg", end="", flush=True)
 
         # SWEEP: walk the body along in interpolated points. At each one
         # the stance legs are re-solved to hold their feet on the SAME
@@ -346,6 +375,10 @@ def run_walk(packet, joints, legs, limits, base, *, half, per_step, n_steps,
             log("\n      after SWEEP clearance: " +
                 ", ".join(f"leg {l} {c:+.0f}mm" for l, c in sorted(clr.items())),
                 end="", flush=True)
+            t = tilt_between(att0, attitude(imu))
+            if t:
+                worst_tilt = max(worst_tilt, t[0])
+                log(f"   tilt {t[0]:.2f}deg", end="", flush=True)
         for k in send(landed):
             trouble.setdefault(k[0], set()).add("plant")
         travelled += per_step
@@ -355,8 +388,25 @@ def run_walk(packet, joints, legs, limits, base, *, half, per_step, n_steps,
 
     log("\n  -> back to neutral stance")
     send({l: base for l in legs})
+
+    heading = None
+    if instrument and imu is not None:
+        att1 = attitude(imu)
+        heading = imu.heading_deg
+        t = tilt_between(att0, att1)
+        log(f"\n  body: worst tilt {worst_tilt:.2f}deg during the walk, "
+            f"{t[0]:.2f}deg at the end" if t else "")
+        log(f"  heading changed {heading:+.1f}deg over the walk "
+            f"(straight line wants 0)")
+        if abs(heading) > 5.0:
+            log(f"  -> it veered. On a straight walk that is asymmetric "
+                f"slip,")
+            log(f"     one side gripping better than the other.")
+
     return {"travelled": travelled, "steps_done": n_steps,
-            "trouble": trouble, "cancelled": False}
+            "trouble": trouble, "cancelled": False,
+            "worst_tilt": worst_tilt if instrument else None,
+            "heading": heading}
 
 
 # =============================================================
@@ -389,7 +439,10 @@ def main():
     ap.add_argument("--no-pause", dest="pause", action="store_false",
                     help="do not ask before moving")
     ap.add_argument("--instrument", action="store_true",
-                    help="measure swing-foot clearance at each phase")
+                    help="measure swing-foot clearance and body tilt "
+                         "at each phase")
+    ap.add_argument("--no-imu", dest="use_imu", action="store_false",
+                    help="skip the body-attitude measurement")
     ap.add_argument("--force", action="store_true",
                     help="walk even if the measured stance is too low")
     ap.add_argument("--dry-run", action="store_true",
@@ -478,6 +531,16 @@ def main():
         return 1
     if require_bus_free(getattr(args, 'force', False)):
         return 1
+
+    imu = None
+    if args.instrument and args.use_imu and Imu is not None:
+        try:
+            imu = Imu().open()
+            print("  IMU: open")
+        except Exception as e:                          # noqa: BLE001
+            print(f"  IMU: unavailable ({type(e).__name__}: {e}) -- "
+                  f"continuing without it")
+
     ports = open_ports(devices)
     if not ports:
         print("No URT could be opened.")
@@ -543,7 +606,7 @@ def main():
             half=p["half"], per_step=p["per_step"], n_steps=p["n_steps"],
             height=args.height, r_foot=p["r_foot"], heading=args.heading,
             lift=args.lift, speed=args.speed, substeps=args.substeps,
-            instrument=args.instrument)
+            instrument=args.instrument, imu=imu)
 
         if outcome["trouble"]:
             print()
@@ -568,6 +631,11 @@ def main():
         print(f"\nBus error: {e}")
         return 1
     finally:
+        if imu is not None:
+            try:
+                imu.close()
+            except Exception:                           # noqa: BLE001
+                pass
         for port in ports.values():
             port.closePort()
 
