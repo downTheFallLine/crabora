@@ -5,8 +5,11 @@ __pycache__/
 .pytest_cache/
 
 # Virtual environments (rebuild per machine: pip install -r software/requirements.txt)
-.venv/
-venv/
+# The glob matters: a venv named .venv-cad slipped past a bare `.venv/`
+# and put 177 MB of macOS-ARM wheels into the history, which then got
+# pulled onto the Pi where they cannot even run.
+.venv*/
+venv*/
 
 # macOS
 .DS_Store
@@ -17,7 +20,6 @@ venv/
 .claude/settings.local.json__pycache__/
 *.pyc
 .DS_Store
-.venv/
 
 # IMU calibration is per-robot, written by utils/calibrate_imu.py
 software/imu_calibration.json
