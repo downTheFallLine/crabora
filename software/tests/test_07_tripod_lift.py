@@ -204,8 +204,12 @@ def ask(question):
 def main():
     ap = argparse.ArgumentParser(
         description="Lift one tripod, ask whether it cleared, put it back.")
-    ap.add_argument("--lift", type=float, default=25.0,
-                    help="femur degrees to lift (default 25, as walk.py uses)")
+    # 35 to match walk.py's default. The femur is the only useful lever
+    # here: at a standing pose it moves the foot 2.09 mm per degree,
+    # where the tibia manages -0.41 (more FLEX lowers the foot) while
+    # throwing it 2 mm outward per degree. Tibia is not the answer.
+    ap.add_argument("--lift", type=float, default=35.0,
+                    help="femur degrees to lift (default 35, as walk.py uses)")
     ap.add_argument("--tripod", choices=["A", "B"], default="A")
     ap.add_argument("--speed", type=int, default=200)
     ap.add_argument("--settle", type=float, default=1.5,
@@ -363,6 +367,24 @@ def main():
             print(f"  this codebase inherits the same error.")
             return 1
 
+        # Does the shortfall match the gap under the caps? If so the body
+        # sank until the chassis hit the floor, and the feet ended up
+        # wherever that left them. More lift cannot fix that.
+        cap_gap = ground_clearance(h_before)
+        if abs(first_computed - cap_gap) < 15:
+            print(f"  FAIL -- AND IT LOOKS LIKE IT BOTTOMED OUT.")
+            print(f"  Computed clearance {first_computed:.0f} mm, gap under the")
+            print(f"  femur caps {cap_gap:.0f} mm. Those matching means the body")
+            print(f"  sank until the chassis reached the floor, so the feet")
+            print(f"  ended up wherever that left them.")
+            print(f"  More lift will not fix this -- it raises the feet relative")
+            print(f"  to a body that is already resting on plastic. Fix the sink:")
+            print(f"    - charge the battery; torque scales with voltage and the")
+            print(f"      stance legs are carrying the whole robot on three legs")
+            print(f"    - stand taller only helps if the legs can hold it there")
+            print(f"    - check by hand whether the caps are touching the floor")
+            print(f"      while the tripod is up")
+            return 1
         print(f"  FAIL -- the tripod never left the floor, up to "
               f"{attempts[-1][0]:g} degrees.")
         print(f"  The femurs reached their commanded angles, so this is not a")
