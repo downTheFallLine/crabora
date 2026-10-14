@@ -39,6 +39,7 @@ Usage:
 """
 
 import argparse
+import math
 import os
 import sys
 import time
@@ -157,7 +158,7 @@ def report_tilt(before, after, r_foot):
     bearing = math.degrees(math.atan2(d_roll, d_pitch))
     drop = r_foot * math.sin(math.radians(tilt))
 
-    print(f"\n  === BODY ATTITUDE (IMU) ===")
+    print("\n  === BODY ATTITUDE (IMU) ===")
     print(f"  {'':<10} {'roll':>9} {'pitch':>9} {'|g|':>7}")
     print(f"  {'standing':<10} {before['roll']:>+8.2f}° {before['pitch']:>+8.2f}° "
           f"{before['g']:>6.3f}")
@@ -174,9 +175,9 @@ def report_tilt(before, after, r_foot):
             print(f"  ⚠ |g| was {v:.3f} while {label} -- the robot was still "
                   f"moving, so that tilt is not trustworthy")
     if tilt < 0.3:
-        print(f"  The body barely tilted. Either the stance legs are holding")
-        print(f"  well, or it sank EVENLY -- which an accelerometer cannot")
-        print(f"  see. Use the ruler to tell those two apart.")
+        print("  The body barely tilted. Either the stance legs are holding")
+        print("  well, or it sank EVENLY -- which an accelerometer cannot")
+        print("  see. Use the ruler to tell those two apart.")
 
 
 def set_femurs(packet, joints, legs, want, speed):
@@ -263,9 +264,14 @@ def main():
         before = {l: read_pose(packet, joints, l) for l in legs}
         h_before = sum(body_height(before[l]) for l in legs) / len(legs)
         v_before = read_volts(packet, joints, legs)
+        att_before = attitude(imu)
         print(f"  standing at {h_before:.0f} mm deck (model) = "
               f"{ground_clearance(h_before):.0f} mm real gap under the caps"
               + (f", supply {v_before:.1f} V" if v_before else ""))
+        if att_before:
+            print(f"  level: roll {att_before['roll']:+.2f}deg, "
+                  f"pitch {att_before['pitch']:+.2f}deg, "
+                  f"|g| {att_before['g']:.3f}")
         if h_before < 30:
             print("\n  That is not standing. Run stand.py first.")
             return 1
