@@ -180,6 +180,17 @@ def report_tilt(before, after, r_foot):
         print("  see. Use the ruler to tell those two apart.")
 
 
+def travel_seconds(degrees, speed):
+    """How long a move of this size takes, plus a margin.
+
+    Measuring before the servo arrives reads a joint in flight as a joint
+    that fell short. At 200 counts/s a 35 degree lift takes 1.99 s, and a
+    flat 1.5 s settle caught it at 26 of the 35 degrees -- which looked
+    exactly like three legs failing under load.
+    """
+    return abs(to_counts(degrees)) / max(1, speed) + 0.4
+
+
 def set_femurs(packet, joints, legs, want, speed):
     """Drive these legs' femurs to want[leg], in pose degrees."""
     for leg in legs:
@@ -213,7 +224,8 @@ def main():
     ap.add_argument("--tripod", choices=["A", "B"], default="A")
     ap.add_argument("--speed", type=int, default=200)
     ap.add_argument("--settle", type=float, default=1.5,
-                    help="seconds to settle before asking")
+                    help="extra seconds to settle AFTER the move should have "
+                         "finished (the travel time is added automatically)")
     ap.add_argument("--no-imu", dest="imu", action="store_false",
                     help="skip the body-attitude measurement")
     ap.add_argument("--imu-address", type=lambda v: int(v, 0), default=0x68,
@@ -293,7 +305,8 @@ def main():
         while True:
             want = {l: before[l]["femur"] + lift for l in swing}
             set_femurs(packet, joints, swing, want, args.speed)
-            time.sleep(args.settle)
+            settle = args.settle + travel_seconds(lift, args.speed)
+            time.sleep(settle)
 
             after = {l: read_pose(packet, joints, l) for l in legs}
             att_after = attitude(imu)
@@ -301,7 +314,8 @@ def main():
             floor = sum(body_height(after[l]) for l in stance) / len(stance)
             computed = {l: floor - body_height(after[l]) for l in swing}
 
-            print(f"\n  --- femur +{lift:g} degrees ---")
+            print(f"\n  --- femur +{lift:g} degrees "
+                  f"(waited {settle:.1f}s) ---")
             print(f"  {'leg':>4} {'commanded':>10} {'reached':>9} "
                   f"{'computed clearance':>19}")
             for l in swing:
@@ -332,7 +346,7 @@ def main():
         print("\n  lowering the tripod back...")
         set_femurs(packet, joints, swing,
                    {l: before[l]["femur"] for l in swing}, args.speed)
-        time.sleep(args.settle)
+        time.sleep(args.settle + travel_seconds(lift, args.speed))
         print("  done. Torque left ON.")
 
         # --- what it means -------------------------------------------
