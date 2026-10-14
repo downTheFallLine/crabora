@@ -316,7 +316,7 @@ forward (the point between legs 1 and 6), 90 left, 180 back, 270 right.
 
 ```bash
 python3 walk.py 300 --dry-run        # geometry only, touches nothing
-python3 walk.py 300                  # 300 mm forward
+python3 walk.py 300                  # 300 mm forward, 100 mm deck
 python3 walk.py 200 --heading 180    # backwards
 python3 walk.py 400 --stride 150     # longer steps, fewer of them
 ```
@@ -335,6 +335,14 @@ The clearance figures are computed from joint angles, which makes them
 and when the body sinks, both move down together. The tilt reading is
 there to catch what they cannot. Note an accelerometer sees tilt but not
 uniform sink, so the two together still do not replace a ruler.
+
+**Default height is 100 mm**, not 80. The femur caps hang 21 mm below the
+deck and the body drops another ~13 mm when a tripod lifts, so 80 leaves
+about 46 mm of real gap under the lowest hardware against 66 at 100.
+Measured on hardware 2026-10-14: standing at 94 mm gave 73 mm under the
+caps and a clean tripod lift, where 75 mm did not. The stride cap falls
+from ±84 mm to ±72 mm, still far more than a 50 mm stride needs — so the
+height costs nothing that matters.
 
 `--dry-run` prints the per-leg coxa angles at both sweep extremes, which
 is where the asymmetry shows: walking forward, the **beam legs (2 and 5)

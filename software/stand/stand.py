@@ -496,7 +496,10 @@ def main():
     ap.add_argument("--phase", choices=["survey", "collapse", "untangle",
                                         "stand", "all"], default="all",
                     help="run one phase only (default: all, in order)")
-    ap.add_argument("--height", type=float, default=80.0,
+    # 100, not 80: see walk.py's DEFAULT_HEIGHT. 80 leaves only ~46 mm
+    # under the femur caps once a tripod lifts, which is where the
+    # chassis starts bottoming out instead of the legs holding it.
+    ap.add_argument("--height", type=float, default=100.0,
                     help="deck clearance to stand at, mm (default 80)")
     ap.add_argument("--foot-out", type=float, default=120.0,
                     help="how far outboard of the knee to plant the foot, mm "

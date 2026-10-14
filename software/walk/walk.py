@@ -82,7 +82,12 @@ from stand import LOADED_TOLERANCE, clamp, move_group, pose_counts  # noqa: E402
 DEFAULT_STRIDE = 50.0    # mm of body travel per step. Bigger covers
                          # ground faster and reaches further out, which
                          # loads the femur harder at the extremes.
-DEFAULT_HEIGHT = 80.0
+# 100, not 80. The femur caps hang 21 mm below the deck and the body
+# drops another ~13 mm when a tripod lifts, so 80 leaves about 46 mm of
+# real gap under the lowest hardware and 67 at 100. Measured on hardware
+# 2026-10-14: standing at 94 mm gave 73 mm under the caps and a clean
+# tripod lift, where 75 mm did not.
+DEFAULT_HEIGHT = 100.0
 DEFAULT_SPEED = 300
 # Femur degrees added to lift the swing tripod. Was 25, which computes
 # to a 50 mm minimum through the swing -- ample on paper, and the feet
