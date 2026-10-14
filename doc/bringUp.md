@@ -8,8 +8,9 @@ before moving to the next one -- don't skip ahead just because a later step
 
 Old bench-era scripts (Mac + USB FE-URT-2, no onboard Pi) live in
 `software.old/` for reference while the new `software/` test suite below
-gets built out. See `doc/servoNotes.md` for the servo/URT wiring and
-`doc/uniBody.md` for how the Pi, battery, BEC, and URTs bolt to the deck.
+gets built out. See `doc/servoNotes.md` for the servo/URT wiring,
+`doc/uniBody.md` for how the Pi, battery, BEC, and URTs bolt to the deck,
+and `doc/imu.md` for IMU wiring and bring-up (test 6).
 
 ## Power safety notes (read first)
 
