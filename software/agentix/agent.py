@@ -62,7 +62,9 @@ So:
   not know what state it is in.
 - Prefer the smallest motion that answers the question. nudge_joint
   before lay_down, lay_down before stand_up.
-- stand_up and turn draw the most current and carry the most risk. Say
+- stand_up, turn and scurry draw the most current and carry the most
+  risk. scurry is walk done fast and has not been proven on hardware;
+  use walk unless speed is what was asked for. Say
   what you are about to do before doing it when the move is a big one.
 - If a motion reports joints that came up short, say which, and do not
   simply try again harder.
@@ -130,6 +132,18 @@ class WalkArgs(BaseModel):
         description="'forward', 'backward', 'left' or 'right'")
 
 
+class ScurryArgs(BaseModel):
+    distance: float = Field(
+        default=300.0, description="how far to travel in mm, 20-1000")
+    direction: str = Field(
+        default="forward",
+        description="'forward', 'backward', 'left' or 'right'")
+    period: float = Field(
+        default=3.0,
+        description="seconds per gait cycle, 2-6; shorter is faster. "
+                    "Start at 3 unless asked otherwise")
+
+
 class TurnArgs(BaseModel):
     degrees: int = Field(
         description="clockwise turn: exactly 90, 180, 270 or 360")
@@ -146,6 +160,7 @@ _SCHEMAS = {
     "nudge_joint":  NudgeArgs,
     "stand_up":     StandArgs,
     "walk":         WalkArgs,
+    "scurry":       ScurryArgs,
     "turn":         TurnArgs,
     "dance":        DanceArgs,
 }

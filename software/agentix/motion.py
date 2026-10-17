@@ -530,6 +530,96 @@ def walk(arbiter, safety, distance: float = 200.0, direction: str = "forward"):
     })
 
 
+SCURRY_PERIOD_MIN, SCURRY_PERIOD_MAX = 2.0, 6.0
+
+
+def scurry(arbiter, safety, distance: float = 300.0,
+           direction: str = "forward", period: float = 3.0):
+    """Walk quickly, via scurry.py's clock-streamed version of walk's gait.
+
+    Reused, not reimplemented: scurry.plan() flies the whole run on paper
+    first and refuses a cycle the femurs cannot follow, and there is no
+    --allow-fast from here. Open loop, so its own voltage guard is what
+    stops it if the supply sags; a stop request ends it the same way,
+    feet planted and torque on.
+    """
+    try:
+        distance = float(distance)
+        period = float(period)
+    except (TypeError, ValueError):
+        raise Unsafe(f"distance and period must be numbers, got "
+                     f"{distance!r}, {period!r}")
+    if not WALK_MIN_MM <= distance <= WALK_MAX_MM:
+        raise Unsafe(f"scurry distance must be {WALK_MIN_MM:g}-"
+                     f"{WALK_MAX_MM:g} mm, got {distance:g}")
+    if not SCURRY_PERIOD_MIN <= period <= SCURRY_PERIOD_MAX:
+        raise Unsafe(f"scurry period must be {SCURRY_PERIOD_MIN:g}-"
+                     f"{SCURRY_PERIOD_MAX:g} s, got {period:g}")
+    heading = HEADINGS.get(str(direction).lower())
+    if heading is None:
+        raise Unsafe(f"direction must be one of "
+                     f"{', '.join(sorted(HEADINGS))}; got {direction!r}")
+
+    _gate(arbiter, safety)
+    import argparse                                  # noqa: PLC0415
+    import scurry as prog                            # noqa: PLC0415
+    from pose import Unreachable                     # noqa: PLC0415
+
+    # Exactly scurry.py's command-line defaults, bar the three asked for.
+    args = argparse.Namespace(
+        distance=distance, heading=heading, period=period,
+        stride=prog.DEFAULT_STRIDE, duty=prog.DEFAULT_DUTY,
+        lift=prog.DEFAULT_LIFT, height=prog.DEFAULT_HEIGHT, foot_out=120.0,
+        coxa_limit=prog.DEFAULT_COXA_LIMIT, rate=prog.DEFAULT_RATE,
+        min_volts=prog.DEFAULT_MIN_VOLTS)
+    legs = sorted(ALL_LEGS)
+    try:
+        p = prog.plan(args, legs)
+    except Unreachable as e:
+        raise Unsafe(f"cannot scurry {distance:g} mm {direction}: {e}")
+    if p["top_v"] > prog.MAX_FOLLOW_SPEED:
+        raise Unsafe(f"a {period:g} s cycle needs {p['top_v']:.0f} steps/s "
+                     f"from the femurs, over the {prog.MAX_FOLLOW_SPEED} "
+                     f"they can be trusted to follow -- use a longer period")
+
+    with arbiter.session(f"scurry {distance:g}mm {direction}") as s:
+        legs = _usable_legs(s, legs)
+        if len(legs) < 6:
+            raise Unsafe(f"scurrying needs all six legs; {sorted(legs)} answered")
+        joints = s.joints()
+        measured = prog.measure_stance(s.packet, joints, legs)
+        if measured and min(measured.values()) < args.height - 25.0:
+            raise Unsafe(f"the body is at {min(measured.values()):.0f} mm and "
+                         f"the gait assumes {args.height:g} -- stand up first")
+        st = prog.Streamer(s.packet, joints, legs, _limits(s, legs))
+        v0 = min(st.volts(l) for l in legs)
+        if v0 < args.min_volts + 0.3:
+            raise Unsafe(f"supply is {v0:.1f} V at rest, within 0.3 V of the "
+                         f"{args.min_volts:g} V stop -- charge the battery")
+        outcome = prog.run_scurry(st, p, args,
+                                  should_cancel=lambda: arbiter.stopping,
+                                  log=lambda *a, **k: None)
+
+    stopped = outcome["stopped"]
+    elapsed = outcome["elapsed"]
+    return _done(safety, {
+        "action": "scurry", "direction": direction, "period_s": period,
+        "asked_mm": round(distance), "travelled_mm": round(outcome["travelled"]),
+        "seconds": round(elapsed, 1),
+        "speed_mm_s": round(outcome["travelled"] / elapsed) if elapsed else None,
+        "volts_at_rest": round(v0, 1),
+        "volts_lowest": outcome["min_volts"],
+        "cancelled": stopped == "cancelled",
+        "stopped": stopped if stopped != "cancelled" else None,
+        "late_frames": outcome["late"] or None,
+        "clamped_goals": st.clamped or None,
+        "note": ("commanded distance, open loop -- measure the floor. "
+                 "Stopped early means feet planted and torque still on"
+                 if stopped else
+                 "commanded distance, open loop -- measure the floor"),
+    })
+
+
 MOTION_TOOLS = {
     "relax": relax,
     "nudge_joint": nudge,
@@ -537,6 +627,7 @@ MOTION_TOOLS = {
     "sit": sit,
     "stand_up": stand,
     "walk": walk,
+    "scurry": scurry,
     "turn": turn,
     "dance": dance,
 }
@@ -572,6 +663,14 @@ MOTION_HELP = {
         "already be standing. It walks sideways and backwards without "
         "turning first -- a hexagon with radial legs has no mechanical "
         "front. Feet are held planted, so a shortfall is real slip."),
+    "scurry": (
+        "Walk QUICKLY in a straight line: the same planted-foot gait as "
+        "walk, streamed continuously instead of stopping between frames. "
+        "distance in mm (20-1000, default 300), direction as for walk, "
+        "period 2-6 s per gait cycle (default 3, about 28 mm/s; shorter "
+        "is faster, and a period the femurs cannot follow is refused). "
+        "The robot must already be standing. Open loop: it stops itself "
+        "if the supply sags, planting its feet and holding."),
     "turn": (
         "Turn clockwise in place by 90, 180, 270 or 360 degrees. The "
         "robot must already be standing. Always clockwise -- there is no "

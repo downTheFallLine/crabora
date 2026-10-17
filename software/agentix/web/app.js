@@ -46,6 +46,8 @@ const UNITS = {
   turned_deg: "\u00b0", degrees: "\u00b0", seconds: "s",
   volts_min: "V", temp_c: "\u00b0C", reach_mm: "mm",
   x_mm: "mm", y_mm: "mm", z_mm: "mm", apart_mm: "mm",
+  asked_mm: "mm", travelled_mm: "mm", period_s: "s",
+  volts_at_rest: "V", volts_lowest: "V",
 };
 
 /* A one-line summary per action, so the first thing read is the outcome
@@ -66,6 +68,10 @@ function headline(d) {
                               (d.clamped ? " (clamped by its travel limit)" : "");
     case "walk":       return `Walked ${d.travelled_mm} mm ${d.direction}` +
                               (d.cancelled ? " \u2014 stopped early" : "");
+    case "scurry":     return `Scurried ${d.travelled_mm} mm ${d.direction}` +
+                              (d.speed_mm_s ? ` at ${d.speed_mm_s} mm/s` : "") +
+                              (d.stopped ? ` \u2014 stopped: ${d.stopped}`
+                               : d.cancelled ? " \u2014 stopped early" : "");
     case "turn":       return `Turned ${d.turned_deg}\u00b0 clockwise` +
                               (d.cancelled ? " \u2014 stopped early" : "");
     case "dance":      return `Danced ${d.seconds}s, ${d.frames} frames` +
@@ -85,6 +91,7 @@ const CONSUMED = {
   nudge:    ["joint", "moved_deg", "clamped", "note"],
   turn:     ["turned_deg", "degrees", "clockwise", "cancelled"],
   walk:     ["travelled_mm", "direction", "cancelled"],
+  scurry:   ["travelled_mm", "direction", "speed_mm_s", "cancelled", "stopped"],
   dance:    ["seconds", "frames", "cancelled"],
 };
 
