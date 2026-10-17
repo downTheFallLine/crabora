@@ -123,8 +123,9 @@ python3 dance/dance.py             # five moves
 
 `software/walk/` holds the gait work: `proto_walk_*.py` exercise one
 joint type at a time, `tripod_coxa.py` and `tripod_coxa_femur.py` build
-up the tripod gait. **There is no forward-walking program yet** — that
-is the obvious gap.
+up the tripod gait. `walk.py` walks in any direction with the feet held
+planted, stop-and-wait; `scurry.py` is the same gait streamed on a clock
+for speed (see [walk/README.md](walk/README.md)).
 
 ---
 
@@ -149,9 +150,9 @@ machine with no servo SDK installed.
   robot stands and turns on it anyway. An inline watt-meter would
   settle whether it is a ceiling or a non-issue before walking leans on
   it.
-- **No forward walking.** The planted-foot technique from `turn.py` is
-  the piece that was missing; translating instead of rotating is the
-  same maths.
+- **Walking speed.** `walk.py` walks; `scurry.py` should walk faster but
+  has not yet run on hardware, and quick tripod reversals are where the
+  unmeasured power path is most likely to show.
 
 ## Legacy
 

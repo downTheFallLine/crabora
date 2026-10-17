@@ -357,3 +357,45 @@ sweep is 0.000000 mm on forward, backward, left, right and diagonal
 headings — the same check `turn.py` had to pass. Stride is capped by
 whichever comes first, leg reach or the coxa limit: ±84 mm forward, ±77 mm
 sideways at 80 mm height. None of that is the same as having walked.
+
+## scurry.py
+
+walk.py's gait, streamed on a clock instead of stop-and-wait. walk.py
+sends a frame, then polls all 18 servos until every one has stopped,
+seven times a step at 300 steps/s. That is how it learned the gait works,
+and it is why the robot stops dead seven times a step.
+
+scurry.py instead computes, at a fixed rate (50 Hz), where every foot
+should be at that instant and sends all eighteen goals in one sync-write
+packet per URT. No replies, no waiting. The geometry is walk.py's
+`stance_pose()`, unchanged; what is new is the timing:
+
+- each tripod is down for `--duty` of the cycle (0.55), so both tripods
+  are briefly on the floor together at each changeover
+- the swing foot leaves and lands moving with the floor (a Hermite curve
+  on the stride, a raised cosine on the femur), so lift-off and
+  touchdown carry no velocity jump
+- the cycle rate ramps up over the first period and down over the last
+
+```bash
+python3 scurry.py 500 --dry-run          # plan, joint speeds, touches nothing
+python3 scurry.py 500                    # 3 s cycles, ~28 mm/s
+python3 scurry.py 500 --period 2.5       # then shorten a step at a time
+```
+
+**It is open loop.** walk.py knew whether each joint arrived; this does
+not ask. In place of that it reads supply voltage every 0.2 s and stops
+below `--min-volts` (6.5), and ends the run on any bus error. Stopping
+means planting whichever feet are up and holding, torque on.
+
+**The femur sets the speed limit.** The 35° swing lift has to go up and
+down inside the swing, so it is the fastest joint by far: about 1000
+steps/s at a 3 s cycle, 1500 at 2 s. `--dry-run` refuses anything over
+1500 steps/s (half an unloaded STS3215, as a guess at what a loaded one
+will follow) unless `--allow-fast` is passed. A longer stride with less
+lift buys speed more cheaply than a shorter period: `--period 1.5
+--stride 80 --lift 25` plans at ~83 mm/s with the femur at ~1640.
+
+**Not yet run on hardware.** Tested against a fake bus: 50 Hz held with no
+late frames, the packets decode with valid checksums, and the low-voltage
+stop plants and holds.
