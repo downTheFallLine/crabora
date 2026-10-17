@@ -62,7 +62,7 @@ from stand import (  # noqa: E402
     LOADED_TOLERANCE, clamp, move_group, pose_counts,
 )
 
-DEFAULT_HEIGHT = 80.0
+DEFAULT_HEIGHT = 100.0
 DEFAULT_AMP    = 15.0     # degrees, or mm for the height moves
 DEFAULT_SPEED  = 1400     # steps/s -- brisk; the stand runs at 200
 DEFAULT_REPS   = 2

@@ -76,7 +76,7 @@ TURNS = (90, 180, 270, 360)
 DEFAULT_STEP = 30.0      # BODY degrees per step; the legs can manage
                          # more, but a bigger step reaches further
                          # round and loads the femur harder
-DEFAULT_HEIGHT = 80.0
+DEFAULT_HEIGHT = 100.0
 DEFAULT_SPEED = 300
 DEFAULT_LIFT = 25.0      # femur degrees added to lift the swing tripod
 

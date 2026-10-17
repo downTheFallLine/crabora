@@ -314,7 +314,7 @@ def sit(arbiter, safety):
                           "pose": {k: round(v, 1) for k, v in p.items()}})
 
 
-def stand(arbiter, safety, height: float = 80.0):
+def stand(arbiter, safety, height: float = 100.0):
     """Stand up, through stand.py's phases.
 
     Not reimplemented. Collapse, untangle and stand -- with the floor
@@ -655,7 +655,7 @@ MOTION_HELP = {
     "stand_up": (
         "Stand up from any pose, including a tangled one. Runs the full "
         "recovery: collapse, untangle leg by leg, then stand. Optional "
-        "height, 40-160 mm of deck clearance, default 80. Takes tens of "
+        "height, 40-160 mm of deck clearance, default 100. Takes tens of "
         "seconds and is the highest-current thing the robot does."),
     "walk": (
         "Walk in a straight line. distance in mm (20-1000, default 200), "

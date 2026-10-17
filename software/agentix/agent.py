@@ -121,7 +121,7 @@ class NudgeArgs(BaseModel):
 
 class StandArgs(BaseModel):
     height: float = Field(
-        default=80.0, description="deck clearance in mm, 40-160")
+        default=100.0, description="deck clearance in mm, 40-160")
 
 
 class WalkArgs(BaseModel):
