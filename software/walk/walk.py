@@ -144,7 +144,13 @@ def stance_pose(leg, s, height, r_foot, heading=0.0):
     cy = BODY_TO_COXA_AXIS * math.sin(phi)
     vx, vy = fx - cx, fy - cy
     reach = math.hypot(vx, vy)
-    coxa = math.degrees(math.atan2(vy, vx) - phi)
+    # Wrapped to +/-180. For the left legs phi is -210..-330 degrees, so
+    # the raw difference comes out near 360 -- the right angle, one turn
+    # round. pose_counts() turns 355 degrees into ~6090 counts and clamp()
+    # then pins the coxa at its firmware limit, so legs 4-6 sat at their
+    # travel stop instead of tracking. The dry-run never showed it because
+    # it prints _normalise()d angles.
+    coxa = _normalise(math.degrees(math.atan2(vy, vx) - phi))
     femur, tibia = leg_ik(out=reach - COXA_RADIAL,
                           down=height + COXA_VERTICAL)
     return {"coxa": coxa, "femur": femur, "tibia": tibia}

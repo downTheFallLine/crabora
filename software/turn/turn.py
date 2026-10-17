@@ -124,7 +124,10 @@ def stance_pose(leg, rho, height, r_foot):
     cy = BODY_TO_COXA_AXIS * math.sin(phi)
     vx, vy = fx - cx, fy - cy
     reach = math.hypot(vx, vy)
-    coxa = math.degrees(math.atan2(vy, vx) - phi)
+    # Wrapped to +/-180: for the left legs the raw difference lands near
+    # 360, which pose_counts() makes ~6000 counts and clamp() pins at the
+    # coxa's firmware limit. Same bug, same fix, as walk.stance_pose().
+    coxa = (math.degrees(math.atan2(vy, vx) - phi) + 180.0) % 360.0 - 180.0
     femur, tibia = leg_ik(out=reach - COXA_RADIAL,
                           down=height + COXA_VERTICAL)
     return {"coxa": coxa, "femur": femur, "tibia": tibia}
