@@ -241,7 +241,6 @@ function setArmed(safety) {
   armedUntil = armed ? Date.now() + safety.seconds_left * 1000 : 0;
   $("arm").textContent = armed ? `ARMED ${safety.seconds_left}s` : "ARM";
   $("arm").classList.toggle("on", armed);
-  $("phase").textContent = armed ? "motion armed" : "read-only";
   document.querySelectorAll("[data-motion]").forEach((b) => {
     b.disabled = !armed;
   });

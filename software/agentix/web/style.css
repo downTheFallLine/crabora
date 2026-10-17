@@ -55,16 +55,6 @@ body { display: flex; flex-direction: column; }
   box-shadow: 0 0 10px rgba(91,140,255,.75);
 }
 
-.phase {
-  font-size: 10px;
-  letter-spacing: .1em;
-  text-transform: uppercase;
-  color: var(--muted);
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 2px 8px;
-  margin-left: 2px;
-}
 
 .lights { display: flex; gap: 6px; margin-left: auto; }
 
