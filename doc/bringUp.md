@@ -14,8 +14,9 @@ and `doc/imu.md` for IMU wiring and bring-up (test 6).
 
 ## Power safety notes (read first)
 
-- The bench PSU is a 5A supply -- that is the binding constraint during
-  dev/test. Don't expect to run all 6 legs under full load off it.
+- See `doc/power.md` for the three power domains (PRIPOWER, LOCOPOWER,
+  LOGIPOWER). LOCOPOWER's buck is the binding constraint: today's LM2596
+  is good for ~2A, nowhere near 6 legs under full load.
 - Never route servo bus power through the URT from the Pi's own supply --
   power goes into each FE-URT-2 directly; the URT just carries it
   downstream to its two legs' coxa cables.

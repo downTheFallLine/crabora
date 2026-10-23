@@ -16,7 +16,7 @@ b.) BEC converter (Qty 2) -- two different outputs, NOT a split load:
        - 7.4 V -> servo bus, via the URTs
     So the servos are fed by ONE converter. Its current rating is the
     ceiling for everything the legs do, and the Pi's draw does not come
-    out of that budget.
+    out of that budget. See doc/power.md (LOCOPOWER / LOGIPOWER).
 c.) Raspberry Pi
 d.) URT (Qty 3)
 e.) Coxa servo w. cap (Qty 6)

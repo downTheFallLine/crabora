@@ -1,0 +1,141 @@
+# Power architecture: PRIPOWER, LOCOPOWER, LOGIPOWER
+
+Crabora's power is three separate domains. Thinking of them separately is
+what keeps a servo brownout from looking like a software bug, and a Pi
+under-volt from looking like a servo fault.
+
+| Domain | What it is | Feeds |
+| --- | --- | --- |
+| **PRIPOWER** | The battery world: pack, fuse, alarm, charging | LOCOPOWER and LOGIPOWER |
+| **LOCOPOWER** | Locomotion power: the 7.4 V buck and everything downstream to the servos | 18 STS3215 servos, via the 3 FE-URT-2s |
+| **LOGIPOWER** | Logic power: the 5 V converter and everything that thinks or senses | Raspberry Pi, IMU, later a camera etc. |
+
+```
+                    +--------------------------------------------+
+                    |                 PRIPOWER                   |
+                    |  3S LiPo --> fuse --> main switch --> split |
+                    |     |                                      |
+                    |  balance lead --> cell alarm               |
+                    +----------------------+---------------------+
+                                           |
+                     +---------------------+---------------------+
+                     |                                           |
+          +----------v-----------+                    +----------v-----------+
+          |      LOCOPOWER       |                    |      LOGIPOWER       |
+          |  buck --> 7.4 V      |                    |  BEC --> 5 V         |
+          |   --> 3x FE-URT-2    |                    |   --> Raspberry Pi   |
+          |   --> 6 legs x 3     |                    |   --> 3.3 V: IMU     |
+          |       STS3215        |                    |   --> (camera, later)|
+          +----------+-----------+                    +----------+-----------+
+                     |                                           |
+                     +-------------- common ground --------------+
+```
+
+The two converters are **not** a split load. LOCOPOWER's buck is the whole
+ceiling for the legs, and the Pi's draw does not come out of it (see
+`doc/uniBody.md`). The domains do share one ground: the URTs talk to the
+Pi over USB, so the servo ground and the Pi ground must be common or the
+bus misbehaves.
+
+## PRIPOWER: batteries
+
+**Today:** a 2S pack (8.4 V full). Capacity and C rating unconfirmed.
+
+**Planned:** 3S, because LOCOPOWER's buck needs headroom (below).
+
+| Part | Choice | Notes |
+| --- | --- | --- |
+| Pack | Zeee 3S 2200 mAh 50C, XT60, 2-pack (Amazon B0BYNSH6Q7) | 137 g, 75 x 34 x 26.5 mm. 12.6 V full, ~9.9 V empty. 50C = ~110 A available, far above need |
+| Fuse | 20-25 A inline, right after the pack | The buck has no protective current limit of its own worth trusting |
+| Wire | 14 AWG pack -> split | |
+| Cell alarm | Apex RC #1655 (1-8S, 2-pack) on the balance lead | Set to **3.5 V/cell**. Black wire to the alarm's "-" end |
+| Charger | 3S-capable balance charger | Always balance-charge |
+
+Why 3S and not 2S: a buck converter needs roughly 1.5-2 V more in than
+out. A 2S pack is 8.4 V full and ~7.4 V near empty, so no buck can hold
+7.4 V from it. Today's LM2596 just passes the pack through minus a
+volt, and the servos lose torque as the pack drains. A 3S pack stays
+above ~9.9 V for its whole discharge.
+
+Rules:
+
+- **Unplug the cell alarm when the robot is put away.** It draws a little
+  current constantly and will over-discharge a stored pack.
+- Stop at the alarm. Don't run a LiPo below 3.0 V/cell.
+- Store LiPos at ~3.8 V/cell (the charger's storage mode), not full.
+
+**Future:** an INA226 on the Pi's I2C bus reading pack voltage, so the
+software can see the pack (see the LOCOPOWER gotcha below). Its stock
+shunt is only good for ~0.8 A, so it reads voltage only unless the shunt
+is swapped for a heavy one.
+
+## LOCOPOWER: servos
+
+**Today:** SELOKY LM2596 buck, set to 7.4 V. Good for ~2 A continuous
+(3 A absolute). Enough for coxa and femur bring-up and a short walk; not
+enough for reliable walking or scurry.
+
+**Planned:** a 300 W "20 A" CC/CV step-down module (6-40 V in), set to
+7.4 V. These are really 15 A continuous, with a fan needed above that. Use
+the CC knob as a current limit, the way the old 5 A bench supply was one.
+Add a 1000-2200 uF / 16 V+ capacitor across the output to soak up the
+spikes when many servos start at once.
+
+Path: buck -> each FE-URT-2's power input -> the URT's two bus ports ->
+one leg per port -> coxa -> femur -> tibia. 3 URTs x 2 legs = 6 legs.
+
+Estimated load at 7.4 V (from the STS3215 datasheet, not measured):
+
+| Situation | Current |
+| --- | --- |
+| All 18 idle, unloaded | ~0.4 A |
+| Standing still | ~2-3 A |
+| Stand up / lay down | ~5-8 A |
+| Walking (tripod) | ~10-12 A, peaks ~15 A |
+| Scurry | 15 A+ peaks |
+| All 18 stalled (theoretical) | 45 A, never happens |
+
+Servo limits (STS3215 datasheet): stall 2.5 A, rated 0.65 A,
+over-current cut at >2 A for 2 s, over-voltage trip above 8 V, under-voltage
+below 4 V.
+
+Gotchas:
+
+- **Brownout mimics wiring faults.** When the buck tops out, servos drop off
+  the bus and IDs vanish intermittently. Suspect LOCOPOWER before the harness.
+- **Once the buck regulates, the servos can't see a low pack.** They read a
+  steady 7.4 V until the pack collapses, so `motion.py`'s <6.2 V preflight
+  stops catching a draining battery. The cell alarm covers this today; the
+  INA226 is the software fix.
+- **The URTs are the next bottleneck.** Each FE-URT-2 carries two legs,
+  ~5-6 A while walking, through connectors rated ~3 A per pin. If URTs run
+  warm or errors appear after the buck upgrade, inject power into each leg
+  directly and let the URTs carry data only.
+
+Verify the table above with an inline watt meter between the buck and the
+URTs, running stand, walk and scurry.
+
+## LOGIPOWER: Pi and sensors
+
+**Today:** a separate BEC set to 5 V -> Raspberry Pi 3. The IMU (MPU-6050)
+runs from the Pi's 3.3 V pin, **not 5 V** (see `doc/imu.md`). The URTs'
+USB data connections come from the Pi.
+
+Budget: a Pi 3 wants 5.1 V at up to 2.5 A. The BEC's rating is
+unconfirmed. A camera will add to the load, so check the BEC before
+adding one.
+
+Gotchas:
+
+- Under-voltage on the Pi almost always means the cable or connector into
+  the Pi, not the Pi. `software/tests/test_01_pi_stability.py` catches it.
+- Nothing on the I2C bus or GPIO may see more than 3.3 V. Never connect a
+  pack voltage or balance lead to a GPIO pin.
+
+## Open items
+
+- PRIPOWER: buy the 3S packs, charger, fuse, and alarm.
+- LOCOPOWER: buy the 20 A buck; measure real currents with a watt meter.
+- LOGIPOWER: confirm the 5 V BEC's model and current rating before the
+  camera goes on.
+- Add the INA226 pack-voltage check to the motion preflight.
