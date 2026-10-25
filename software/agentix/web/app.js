@@ -345,41 +345,54 @@ $("stop").addEventListener("click", async () => {
  * Speech SYNTHESIS has no such requirement, so Voice works either way.
  */
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-const canHear = !!SR && window.isSecureContext;
 const canSpeak = "speechSynthesis" in window;
 
 let recog = null, listening = false, speakReplies = false;
 
+// Three states, not two. Chrome fires "start" at once but its speech
+// service takes several seconds (measured: ~4.8 s on Tom's Mac, with the
+// microphone itself opening in 0.15 s) before "audiostart", when it is
+// actually taking sound. Lighting the button up on "start" told you to
+// talk into a microphone that was not open yet, the speech was lost, and
+// the session ended in "no-speech". So: Wait... until audiostart, then
+// Speak now.
 function micState(state, label) {
   const b = $("mic");
+  b.classList.toggle("starting", state === "starting");
   b.classList.toggle("listening", state === "listening");
   $("mic-label").textContent = label;
 }
 
+// Why the mic cannot work here, or null if it can. Checked on every tap
+// and said in the chat, not only in a hover title nobody reads -- a
+// greyed-out button that does nothing when tapped looks like a bug.
+//
 // Check the CONTEXT before the constructor. Browsers differ in how they
 // refuse an insecure page: Chrome exposes webkitSpeechRecognition and
 // fails at start(), Safari does not define it at all. Testing for the
 // constructor first therefore reports "no such feature" on a browser
 // that has the feature and is only objecting to http -- the wrong
 // diagnosis, pointing at the wrong fix.
-if (!window.isSecureContext) {
-  $("mic").disabled = true;
-  micState("", "Mic blocked");
-  $("mic").title =
-    "The microphone needs https or localhost -- this page is plain http. " +
-    "Reach it through an SSH tunnel: " +
-    "ssh -N -L 5050:localhost:5000 ubuntu@<pi>, then http://localhost:5050/";
-} else if (!SR) {
-  $("mic").disabled = true;
-  micState("", "No mic");
-  $("mic").title =
-    "This browser has no speech recognition. Chrome and Safari both do; " +
-    "Firefox does not.";
+const micBlocked =
+  !window.isSecureContext
+    ? "The microphone needs https or localhost, and this page is plain " +
+      `http (${location.host}). Reach it through an SSH tunnel instead: ` +
+      "ssh -N -L 5050:localhost:5000 ubuntu@<pi>, then open " +
+      "http://localhost:5050/"
+  : !SR
+    ? "This browser has no speech recognition. Chrome and Safari both " +
+      "do; Firefox does not."
+  : null;
+
+if (micBlocked) {
+  $("mic").classList.add("blocked");
+  micState("", window.isSecureContext ? "No mic" : "Mic blocked");
+  $("mic").title = micBlocked;
 }
 
 function startListening() {
   recog = new SR();
-  recog.lang = "en-US";
+  recog.lang = navigator.language || "en-US";
   recog.interimResults = true;
   recog.continuous = false;          // stops on its own at a pause
   recog.maxAlternatives = 1;
@@ -388,9 +401,11 @@ function startListening() {
   // runs synchronously from the click handler.
 
   const input = $("prompt");
-  let finalText = "";
+  const typed = input.value;
+  let finalText = "", heard = false, failed = false;
 
-  recog.onstart = () => { listening = true; micState("listening", "Listening"); };
+  recog.onstart = () => { listening = true; micState("starting", "Wait…"); };
+  recog.onaudiostart = () => micState("listening", "Speak now");
 
   recog.onresult = (ev) => {
     let interim = "";
@@ -399,35 +414,55 @@ function startListening() {
       if (r.isFinal) finalText += r[0].transcript;
       else interim += r[0].transcript;
     }
+    heard = true;
     input.value = (finalText + interim).trim();
   };
 
   recog.onerror = (ev) => {
+    failed = true;
+    if (ev.error === "aborted") return;     // the user tapped it off
     const why = {
-      "not-allowed": "Microphone permission was refused. Allow it in the " +
-                     "address bar, then try again.",
+      "not-allowed": "Microphone permission was refused. Allow it from " +
+                     "the icon in the address bar, then try again. On a " +
+                     "Mac, Chrome also needs System Settings → Privacy " +
+                     "& Security → Microphone.",
       "service-not-allowed": "The browser blocked speech recognition. This " +
                      "usually means the page is not on https or localhost.",
-      "no-speech": "I did not hear anything.",
-      "audio-capture": "No microphone was found.",
-      "network": "Speech recognition could not reach its network service.",
-    }[ev.error] || `Speech recognition failed: ${ev.error}`;
+      "no-speech": "I did not hear anything. Wait for the button to say " +
+                   "Speak now before talking.",
+      "audio-capture": "No microphone was found, or another app has it.",
+      "network": "Speech recognition could not reach its network service " +
+                 "(Chrome sends the audio to Google to transcribe).",
+      "language-not-supported": `Speech recognition does not support ` +
+                 `the language "${recog.lang}".`,
+    }[ev.error] || `Speech recognition failed: ${ev.error}` +
+                   (ev.message ? ` (${ev.message})` : "");
     sayText("crabora", "bot bad", why);
   };
 
   recog.onend = () => {
     listening = false;
     micState("", "Talk");
-    const text = input.value.trim();
+    // Only send what was actually heard. Without this a failed or silent
+    // session would send whatever had been typed before tapping Talk.
+    if (!heard) { input.value = typed; return; }
+    if (failed && !finalText) return;       // half a sentence, leave it
     // Send it the same way typing would, so there is one path into chat.
-    if (text) $("composer").dispatchEvent(new Event("submit", {cancelable: true}));
+    if (input.value.trim())
+      $("composer").dispatchEvent(new Event("submit", {cancelable: true}));
   };
 
-  try { recog.start(); }
-  catch { listening = false; micState("", "Talk"); }
+  try {
+    recog.start();
+  } catch (e) {
+    listening = false;
+    micState("", "Talk");
+    sayText("crabora", "bot bad", `Could not start the microphone: ${e.message}`);
+  }
 }
 
 $("mic").addEventListener("click", () => {
+  if (micBlocked) { sayText("crabora", "bot bad", micBlocked); return; }
   if (listening) { recog && recog.stop(); return; }
   if (canSpeak) window.speechSynthesis.cancel();   // do not talk over the user
   startListening();

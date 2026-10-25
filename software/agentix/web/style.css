@@ -321,8 +321,13 @@ details.raw pre { margin-top: 8px; }
   color: var(--accent);
 }
 
-/* Disabled mic is a precondition, not a breakage; the title says which. */
-.btn.mic:disabled { opacity: .4; cursor: not-allowed; }
+/* Started but the microphone is not open yet -- do not talk. */
+.btn.mic.starting { border-color: var(--warn); color: var(--warn); }
+.btn.mic.starting .dot { background: var(--warn); }
+
+/* Blocked mic is a precondition, not a breakage. Still clickable: a tap
+   says why in the chat. */
+.btn.mic.blocked { opacity: .5; }
 
 @media (prefers-reduced-motion: reduce) {
   .btn.mic.listening .dot { animation: none; }

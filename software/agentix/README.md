@@ -232,6 +232,19 @@ privacy permission, which Chrome needs to reach a LAN address at all.
 
 Reading replies aloud has no such requirement and works either way.
 
+### Wait for "Speak now"
+
+After a tap the button reads **Wait…** (amber), then **Speak now**
+(red, pulsing). Do not talk until it says Speak now. Chrome's speech
+service takes several seconds to start taking sound — measured at
+~4.8 s on the Mac, with the microphone itself opening in 0.15 s — and
+anything said before then is lost. The button used to light up at once,
+so speech went into a mic that was not open yet and every attempt ended
+in "I did not hear anything".
+
+Every failure (blocked page, refused permission, no speech, no network)
+is said in the chat, not only in a hover title.
+
 Recognition works in Chrome and Safari; Firefox has none. Note that
 browsers refuse an insecure page differently -- Chrome exposes
 `webkitSpeechRecognition` and fails at `start()`, Safari does not define
