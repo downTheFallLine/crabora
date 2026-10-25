@@ -209,6 +209,59 @@ pre {
   .actions { order: 2; }
 }
 
+/* ---------------- tilt ---------------- */
+.tilt {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 10px 0;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+}
+.gauge { margin: 0; display: flex; flex-direction: column; align-items: center; }
+.gauge svg { width: 100px; height: 80px; overflow: visible; }
+.gauge figcaption { font-size: 12.5px; letter-spacing: .02em; }
+.gauge figcaption b {
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  display: inline-block;
+  min-width: 46px;
+  text-align: right;
+}
+.gauge text { fill: var(--muted); font-size: 9px; }
+.gauge .level { stroke: var(--line); stroke-width: 1.2; stroke-dasharray: 3 3; }
+.gauge .ticks { stroke: var(--muted); stroke-width: 1.2; }
+.gauge .body {
+  /* SVG elements rotate about the viewBox origin, which is the centre
+     here -- so a plain rotate() pivots the body in place. */
+  transition: transform .45s ease-out;
+  color: var(--good);
+}
+.gauge .body rect, .gauge .body .nose { fill: currentColor; }
+.gauge .body .legs { fill: none; stroke: currentColor; stroke-width: 2.4;
+                     stroke-linecap: round; stroke-linejoin: round; }
+.gauge .body .pointer { stroke: currentColor; stroke-width: 1.4; }
+
+.tilt[data-level="warn"] .body { color: var(--warn); }
+.tilt[data-level="bad"]  .body { color: var(--bad); }
+/* No reading, or one that cannot be trusted: grey the robot out rather
+   than leave it showing the last good angle as if it were current. */
+.tilt[data-level="none"] .body { color: var(--muted); opacity: .45; }
+.tilt.moving .body { opacity: .6; }
+
+.tilt-meta { font-size: 13px; line-height: 1.45; min-width: 0; }
+.tilt-state { color: var(--text); font-weight: 600; }
+.tilt-detail { overflow-wrap: anywhere; }
+
+@media (max-width: 620px) {
+  .tilt { gap: 8px; }
+  .gauge svg { width: 80px; height: 64px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .gauge .body { transition: none; }
+}
+
 /* ---------------- motion ---------------- */
 .sep {
   width: 1px;

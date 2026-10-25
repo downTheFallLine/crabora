@@ -10,6 +10,7 @@ Endpoints:
 
     GET  /api/health        is the server up, is the bus open
     GET  /api/status        robot health summary (cheap, for polling)
+    GET  /api/imu           pitch and roll, for the tilt widget (polled)
     GET  /api/tools         what the agent can call, and what each does
     POST /api/tools/<name>  call one tool directly, bypassing the model
     POST /api/chat          natural language in, answer out
@@ -32,6 +33,7 @@ Requires: pip install flask
 """
 
 import argparse
+import logging
 import os
 import sys
 import traceback
@@ -64,6 +66,17 @@ SAFE = Safety()
 # on another machine could not tell a missing API key from a missing
 # dependency -- both just showed "no agent".
 AGENT_REASON = "not started"
+
+
+class _QuietPolls(logging.Filter):
+    """Drop the access-log line for /api/imu. The tilt widget polls it
+    every second; logged, that is 86,400 journal lines a day burying the
+    ones worth reading."""
+    def filter(self, record):
+        return "/api/imu " not in record.getMessage()
+
+
+logging.getLogger("werkzeug").addFilter(_QuietPolls())
 
 
 def _fail(message, code=500, **extra):
@@ -108,6 +121,13 @@ def status():
         return _fail(str(e), 409)
     except ArbiterError as e:
         return _fail(str(e), 503)
+
+
+@app.get("/api/imu")
+def imu():
+    # Not under ARB: the IMU is on I2C, not the servo bus, so tilt still
+    # reads with the bus down or a motion holding it.
+    return jsonify({"ok": True, "result": READ_ONLY_TOOLS["imu_state"]()})
 
 
 @app.get("/api/tools")

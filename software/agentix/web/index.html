@@ -55,6 +55,43 @@
 </header>
 
 <main>
+  <!-- Tilt from the IMU, drawn as the robot itself: seen from behind for
+       roll, from its right side for pitch. True angles, not exaggerated
+       -- the ticks are there so a few degrees can still be read. -->
+  <section class="tilt" id="tilt" aria-label="Body tilt from the IMU">
+    <figure class="gauge">
+      <svg viewBox="-50 -40 100 80" aria-hidden="true">
+        <path class="ticks" d="M0,-34 L0,-30 M-11.6,-31.9 L-10.3,-28.2 M11.6,-31.9 L10.3,-28.2 M-5.9,-33.5 L-5.2,-29.5 M5.9,-33.5 L5.2,-29.5 M-21.9,-26.1 L-19.3,-23 M21.9,-26.1 L19.3,-23"/>
+        <line class="level" x1="-46" y1="0" x2="46" y2="0"/>
+        <g class="body" id="roll-body">
+          <line class="pointer" x1="0" y1="0" x2="0" y2="-28"/>
+          <path class="legs" d="M-24,0 L-34,-9 L-40,13 M24,0 L34,-9 L40,13"/>
+          <rect x="-25" y="-5" width="50" height="10" rx="3"/>
+        </g>
+        <text x="-46" y="34">L</text><text x="46" y="34" text-anchor="end">R</text>
+      </svg>
+      <figcaption>roll <b id="roll-val">—</b></figcaption>
+    </figure>
+    <figure class="gauge">
+      <svg viewBox="-50 -40 100 80" aria-hidden="true">
+        <path class="ticks" d="M0,-34 L0,-30 M-11.6,-31.9 L-10.3,-28.2 M11.6,-31.9 L10.3,-28.2 M-5.9,-33.5 L-5.2,-29.5 M5.9,-33.5 L5.2,-29.5 M-21.9,-26.1 L-19.3,-23 M21.9,-26.1 L19.3,-23"/>
+        <line class="level" x1="-46" y1="0" x2="46" y2="0"/>
+        <g class="body" id="pitch-body">
+          <line class="pointer" x1="0" y1="0" x2="0" y2="-28"/>
+          <path class="legs" d="M-22,0 L-26,13 M0,0 L0,13 M22,0 L26,13"/>
+          <rect x="-30" y="-5" width="60" height="10" rx="3"/>
+          <path class="nose" d="M30,-4 L37,0 L30,4 Z"/>
+        </g>
+        <text x="-46" y="34">rear</text><text x="46" y="34" text-anchor="end">front</text>
+      </svg>
+      <figcaption>pitch <b id="pitch-val">—</b></figcaption>
+    </figure>
+    <div class="tilt-meta">
+      <div class="tilt-state" id="tilt-state">IMU</div>
+      <div class="tilt-detail" id="tilt-detail">waiting…</div>
+    </div>
+  </section>
+
   <div class="log" id="log" aria-live="polite">
     <div class="msg bot">
       <div class="who">crabora</div>

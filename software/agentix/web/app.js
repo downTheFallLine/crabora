@@ -229,6 +229,77 @@ async function refreshLights() {
   }
 }
 
+/* ---------------- tilt ----------------
+ * Polls /api/imu once a second while the page is visible. The IMU is on
+ * I2C, not the servo bus, so this keeps working with the bus down or a
+ * motion running. With no IMU fitted it backs off to every 10 s, so
+ * plugging one in shows up without a reload.
+ *
+ * Signs, from imu_lib: roll is about +X, positive = LEFT side up; pitch
+ * is about +Y, positive = nose up. Both gauges are drawn so that is what
+ * you see: from behind, left side rising; from the right, nose rising.
+ * SVG rotate() is clockwise-positive with y down, hence the minus.
+ */
+const TILT_MS = 1000, TILT_IDLE_MS = 10000;
+const TILT_WARN = 5, TILT_BAD = 15;          // degrees, either axis
+let tiltTimer = null;
+
+const deg = (v) => `${v > 0 ? "+" : ""}${v.toFixed(1)}\u00b0`;
+
+function showTilt(r) {
+  const t = $("tilt");
+  $("roll-body").style.transform = `rotate(${-r.roll_deg}deg)`;
+  $("pitch-body").style.transform = `rotate(${-r.pitch_deg}deg)`;
+  $("roll-val").textContent = deg(r.roll_deg);
+  $("pitch-val").textContent = deg(r.pitch_deg);
+  const worst = Math.max(Math.abs(r.roll_deg), Math.abs(r.pitch_deg));
+  t.dataset.level = worst >= TILT_BAD ? "bad" : worst >= TILT_WARN ? "warn" : "good";
+  // Tilt comes from the accelerometer, so it is only true when gravity
+  // is the only force on it. Mid-step it is not; say so. Judged on g
+  // alone, NOT r.still: that also tests the gyro, and imu_state never
+  // zeroes the gyro, so its raw bias reads as "moving" on a robot sat
+  // on the bench.
+  const steady = Math.abs(r.g_total - 1) < 0.08;
+  t.classList.toggle("moving", !steady);
+  $("tilt-state").textContent = worst >= TILT_BAD ? "Tilted"
+                              : worst >= TILT_WARN ? "Leaning" : "Level";
+  $("tilt-detail").textContent =
+    `${r.g_total.toFixed(2)} g · ${steady ? "steady" : "moving, approximate"}` +
+    ` · ${r.temp_c.toFixed(0)}\u00b0C`;
+  t.title = "Roll: + is left side up. Pitch: + is nose up.";
+}
+
+function noTilt(state, detail) {
+  const t = $("tilt");
+  t.dataset.level = "none";
+  t.classList.remove("moving");
+  $("roll-val").textContent = "—";
+  $("pitch-val").textContent = "—";
+  $("tilt-state").textContent = state;
+  $("tilt-detail").textContent = detail;
+  t.title = detail;
+}
+
+async function refreshTilt() {
+  clearTimeout(tiltTimer);
+  let next = TILT_MS;
+  if (!document.hidden) {
+    try {
+      const r = (await api("/api/imu")).result;
+      if (r.fitted) showTilt(r);
+      else { noTilt("No IMU", r.error || "not fitted"); next = TILT_IDLE_MS; }
+    } catch (e) {
+      noTilt("IMU offline", e.message);
+      next = TILT_IDLE_MS / 2;
+    }
+  }
+  tiltTimer = setTimeout(refreshTilt, next);
+}
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) refreshTilt();
+});
+refreshTilt();
+
 /* ---------------- arming ---------------- */
 /* The server decides whether motion is allowed; this just reflects it and
  * keeps the buttons honest. Never assume armed state locally -- a window
