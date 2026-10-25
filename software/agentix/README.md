@@ -206,10 +206,24 @@ releases torque.
 
 ## Voice
 
-**Talk** — tap it, speak, and the transcript is sent exactly as if you
-had typed it. It stops on its own at a pause. **Voice** reads replies
-aloud. STOP cancels both, because an emergency stop should not be
+**Talk** starts a hands-free conversation. Tap it once, speak, and what
+you said is sent exactly as if typed; the reply is read aloud, then it
+listens again — no tap per turn. Tap **Talk** again to end it. It ends
+itself after three silent listens (~25 s), so a forgotten tab does not
+keep a live microphone.
+
+It never listens while it is speaking, or the microphone would hear the
+reply and send it back as your next question. Each turn is strictly
+listen → think → speak → listen, and the button says which: **Wait…**,
+**Speak now**, **Thinking…**, **Replying…**.
+
+In a conversation replies are always spoken. **Voice** only decides
+whether *typed* questions get spoken answers. STOP ends the conversation
+and silences the voice, because an emergency stop should not be
 competing with a voice finishing the previous answer.
+
+Safari will not reopen the microphone without a tap, so there a
+conversation lasts one turn and says so; Chrome has no such limit.
 
 ### The microphone needs a secure context
 
@@ -234,8 +248,8 @@ Reading replies aloud has no such requirement and works either way.
 
 ### Wait for "Speak now"
 
-After a tap the button reads **Wait…** (amber), then **Speak now**
-(red, pulsing). Do not talk until it says Speak now. Chrome's speech
+Each listen starts at **Wait…** (amber), then **Speak now** (red,
+pulsing). Do not talk until it says Speak now. Chrome's speech
 service takes several seconds to start taking sound — measured at
 ~4.8 s on the Mac, with the microphone itself opening in 0.15 s — and
 anything said before then is lost. The button used to light up at once,

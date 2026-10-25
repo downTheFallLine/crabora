@@ -353,6 +353,10 @@ details.raw pre { margin-top: 8px; }
   flex: none;
 }
 
+/* In a conversation, between your turns (thinking, replying). */
+.btn.mic.convo { border-color: var(--accent); color: var(--accent); }
+.btn.mic.convo .dot { background: var(--accent); }
+
 /* Listening has to be unmistakable -- a live microphone that looks idle
    is the kind of thing people are rightly annoyed by. */
 .btn.mic.listening {

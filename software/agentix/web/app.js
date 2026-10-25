@@ -384,8 +384,8 @@ $("stop").addEventListener("click", async () => {
   btn.disabled = true;
   // Stop talking and stop listening: an emergency stop should not be
   // competing with a voice reading out the previous answer.
+  endConversation();
   if (canSpeak) window.speechSynthesis.cancel();
-  if (listening && recog) recog.stop();
   sayText("you", "me", "STOP");
   try {
     const res = await fetch("/api/stop", { method: "POST" });
@@ -403,8 +403,18 @@ $("stop").addEventListener("click", async () => {
 
 
 /* ---------------- voice ----------------
- * Tap Talk, speak, and the transcript is sent as if typed. Voice reads
- * replies back.
+ * Tap Talk once to start a CONVERSATION: it listens, sends what you said
+ * as if typed, reads the reply aloud, then listens again -- no tapping
+ * per turn. Tap Talk again (or STOP) to end it. It also ends itself
+ * after a few silent turns, so a forgotten tab does not keep a live
+ * microphone.
+ *
+ * It never listens while it is speaking: the microphone would hear the
+ * reply and send it back as your next question. So each turn is
+ * listen -> think -> speak -> listen, strictly in that order.
+ *
+ * Replies are spoken in a conversation whatever the Voice button says;
+ * Voice only decides whether TYPED questions get spoken answers.
  *
  * SECURE CONTEXT: speech recognition needs https or localhost. Served
  * over plain http from the Pi's LAN address, the browser refuses the
@@ -418,20 +428,30 @@ $("stop").addEventListener("click", async () => {
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 const canSpeak = "speechSynthesis" in window;
 
-let recog = null, listening = false, speakReplies = false;
+// Silent listens in a row before a conversation gives up. Chrome ends a
+// silent listen with "no-speech" after about 8 s, so 3 is roughly 25 s.
+const QUIET_TURNS = 3;
 
-// Three states, not two. Chrome fires "start" at once but its speech
-// service takes several seconds (measured: ~4.8 s on Tom's Mac, with the
-// microphone itself opening in 0.15 s) before "audiostart", when it is
-// actually taking sound. Lighting the button up on "start" told you to
-// talk into a microphone that was not open yet, the speech was lost, and
-// the session ended in "no-speech". So: Wait... until audiostart, then
-// Speak now.
+let recog = null, speakReplies = false;
+let talkMode = false, quietTurns = 0;
+// Bumped by every start. A loop left awaiting a slow reply when its
+// conversation was ended must not wake up inside the NEXT one and run
+// beside it, so each loop checks it is still the current conversation.
+let convoId = 0;
+
+// Chrome fires "start" at once but its speech service can take several
+// seconds (measured: ~4.8 s on Tom's Mac) before "audiostart", when it
+// is actually taking sound. So Wait... until audiostart, then Speak now
+// -- lighting up on "start" told you to talk into a microphone that was
+// not open yet. In a conversation the button also says what the robot
+// is doing between your turns.
 function micState(state, label) {
   const b = $("mic");
+  b.classList.toggle("convo", talkMode);
   b.classList.toggle("starting", state === "starting");
   b.classList.toggle("listening", state === "listening");
   $("mic-label").textContent = label;
+  b.title = talkMode ? "Tap to end the conversation" : "Start a conversation";
 }
 
 // Why the mic cannot work here, or null if it can. Checked on every tap
@@ -461,82 +481,128 @@ if (micBlocked) {
   $("mic").title = micBlocked;
 }
 
-function startListening() {
-  recog = new SR();
-  recog.lang = navigator.language || "en-US";
-  recog.interimResults = true;
-  recog.continuous = false;          // stops on its own at a pause
-  recog.maxAlternatives = 1;
-  // Safari requires start() to happen inside the user gesture that asked
-  // for it, and will not honour continuous. Both are satisfied here: this
-  // runs synchronously from the click handler.
+const RECOG_ERRORS = {
+  "not-allowed": "Microphone permission was refused. Allow it from the " +
+                 "icon in the address bar, then try again. On a Mac, " +
+                 "Chrome also needs System Settings → Privacy & Security " +
+                 "→ Microphone. Safari will not reopen the microphone " +
+                 "without a tap, so a conversation there lasts one turn.",
+  "service-not-allowed": "The browser blocked speech recognition. This " +
+                 "usually means the page is not on https or localhost.",
+  "audio-capture": "No microphone was found, or another app has it.",
+  "network": "Speech recognition could not reach its network service " +
+             "(Chrome sends the audio to Google to transcribe).",
+};
 
-  const input = $("prompt");
-  const typed = input.value;
-  let finalText = "", heard = false, failed = false;
+/* One listen: resolves with what was heard ("" for nothing), or rejects
+ * with a message worth showing. Ending the conversation aborts it, which
+ * resolves null. */
+function listenOnce() {
+  return new Promise((resolve, reject) => {
+    const r = new SR();
+    recog = r;
+    r.lang = navigator.language || "en-US";
+    r.interimResults = true;
+    r.continuous = false;            // stops on its own at a pause
+    r.maxAlternatives = 1;
 
-  recog.onstart = () => { listening = true; micState("starting", "Wait…"); };
-  recog.onaudiostart = () => micState("listening", "Speak now");
+    const input = $("prompt");
+    const typed = input.value;
+    let finalText = "", interim = "", error = null;
 
-  recog.onresult = (ev) => {
-    let interim = "";
-    for (let i = ev.resultIndex; i < ev.results.length; i++) {
-      const r = ev.results[i];
-      if (r.isFinal) finalText += r[0].transcript;
-      else interim += r[0].transcript;
+    r.onstart = () => micState("starting", "Wait…");
+    r.onaudiostart = () => micState("listening", "Speak now");
+
+    r.onresult = (ev) => {
+      interim = "";
+      for (let i = ev.resultIndex; i < ev.results.length; i++) {
+        const res = ev.results[i];
+        if (res.isFinal) finalText += res[0].transcript;
+        else interim += res[0].transcript;
+      }
+      input.value = (finalText + interim).trim();
+    };
+
+    r.onerror = (ev) => { error = ev.error; };
+
+    r.onend = () => {
+      if (recog === r) recog = null;
+      // Only what was actually heard. Without this a silent listen would
+      // send whatever had been typed before tapping Talk.
+      const heard = (finalText || (error ? "" : interim)).trim();
+      if (!heard) input.value = typed;
+      if (error === "aborted") return resolve(null);
+      if (error && error !== "no-speech") {
+        return reject(new Error(RECOG_ERRORS[error] ||
+          `Speech recognition failed: ${error}` +
+          (error === "language-not-supported" ? ` (${r.lang})` : "")));
+      }
+      resolve(heard);
+    };
+
+    // Safari requires start() inside the user gesture that asked for it.
+    // The first listen is; later turns are not, and Safari refuses them
+    // with "not-allowed" -- reported above. Chrome does not mind.
+    try { r.start(); }
+    catch (e) {
+      recog = null;
+      reject(new Error(`Could not start the microphone: ${e.message}`));
     }
-    heard = true;
-    input.value = (finalText + interim).trim();
-  };
+  });
+}
 
-  recog.onerror = (ev) => {
-    failed = true;
-    if (ev.error === "aborted") return;     // the user tapped it off
-    const why = {
-      "not-allowed": "Microphone permission was refused. Allow it from " +
-                     "the icon in the address bar, then try again. On a " +
-                     "Mac, Chrome also needs System Settings → Privacy " +
-                     "& Security → Microphone.",
-      "service-not-allowed": "The browser blocked speech recognition. This " +
-                     "usually means the page is not on https or localhost.",
-      "no-speech": "I did not hear anything. Wait for the button to say " +
-                   "Speak now before talking.",
-      "audio-capture": "No microphone was found, or another app has it.",
-      "network": "Speech recognition could not reach its network service " +
-                 "(Chrome sends the audio to Google to transcribe).",
-      "language-not-supported": `Speech recognition does not support ` +
-                 `the language "${recog.lang}".`,
-    }[ev.error] || `Speech recognition failed: ${ev.error}` +
-                   (ev.message ? ` (${ev.message})` : "");
-    sayText("crabora", "bot bad", why);
-  };
+async function conversation(id) {
+  const live = () => talkMode && id === convoId;
+  quietTurns = 0;
+  while (live()) {
+    let heard;
+    try { heard = await listenOnce(); }
+    catch (e) { if (live()) endConversation(e.message); return; }
+    if (!live() || heard === null) return;
 
-  recog.onend = () => {
-    listening = false;
-    micState("", "Talk");
-    // Only send what was actually heard. Without this a failed or silent
-    // session would send whatever had been typed before tapping Talk.
-    if (!heard) { input.value = typed; return; }
-    if (failed && !finalText) return;       // half a sentence, leave it
-    // Send it the same way typing would, so there is one path into chat.
-    if (input.value.trim())
-      $("composer").dispatchEvent(new Event("submit", {cancelable: true}));
-  };
+    if (!heard) {
+      if (++quietTurns >= QUIET_TURNS) {
+        endConversation("I have not heard anything for a while, so I " +
+                        "stopped listening. Tap Talk to carry on.");
+        return;
+      }
+      continue;
+    }
+    quietTurns = 0;
 
-  try {
-    recog.start();
-  } catch (e) {
-    listening = false;
-    micState("", "Talk");
-    sayText("crabora", "bot bad", `Could not start the microphone: ${e.message}`);
+    micState("", "Thinking…");
+    $("prompt").value = "";
+    const reply = await sendChat(heard);
+    if (!live()) return;
+    if (reply === null) {               // the chat failed; it said why
+      endConversation();
+      return;
+    }
+    micState("", "Replying…");
+    await speak(reply);
   }
+}
+
+function startConversation() {
+  talkMode = true;
+  if (canSpeak) window.speechSynthesis.cancel();   // do not talk over the user
+  conversation(++convoId);
+}
+
+// Safe to call any time, including when no conversation is running.
+function endConversation(why) {
+  const was = talkMode;
+  talkMode = false;
+  if (recog) recog.abort();
+  if (was && canSpeak) window.speechSynthesis.cancel();
+  if (!micBlocked) micState("", "Talk");
+  if (why) sayText("crabora", "bot bad", why);
 }
 
 $("mic").addEventListener("click", () => {
   if (micBlocked) { sayText("crabora", "bot bad", micBlocked); return; }
-  if (listening) { recog && recog.stop(); return; }
-  if (canSpeak) window.speechSynthesis.cancel();   // do not talk over the user
-  startListening();
+  if (talkMode) endConversation();
+  else startConversation();
 });
 
 /* --- speaking --- */
@@ -549,25 +615,47 @@ $("speak").addEventListener("click", () => {
   $("speak").textContent = speakReplies ? "Voice on" : "Voice off";
   $("speak").classList.toggle("on", speakReplies);
   $("speak").setAttribute("aria-pressed", String(speakReplies));
-  if (!speakReplies) window.speechSynthesis.cancel();
+  if (!speakReplies && !talkMode) window.speechSynthesis.cancel();
 });
 
+/* Speak text; resolves when it has finished (or been cancelled), so the
+ * conversation knows when it may listen again.
+ *
+ * Queued a sentence at a time: Chrome silently stops a single long
+ * utterance after about 15 s and then never fires its end event, which
+ * would leave a conversation waiting forever. The poll is the backstop
+ * for the same bug -- if nothing is speaking or queued, it is done. */
 function speak(text) {
-  if (!speakReplies || !canSpeak || !text) return;
+  if (!canSpeak || !text) return Promise.resolve();
   window.speechSynthesis.cancel();
-  const u = new SpeechSynthesisUtterance(text);
-  u.rate = 1.0;
-  u.pitch = 0.9;          // a shade below default; it is a robot
-  window.speechSynthesis.speak(u);
+  const parts = text.replace(/\s+/g, " ").match(/[^.!?]+[.!?]*["')\]]*\s*/g)
+                || [text];
+  return new Promise((resolve) => {
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      clearInterval(poll);
+      resolve();
+    };
+    parts.forEach((p, i) => {
+      const u = new SpeechSynthesisUtterance(p.trim());
+      u.rate = 1.0;
+      u.pitch = 0.9;        // a shade below default; it is a robot
+      if (i === parts.length - 1) { u.onend = finish; u.onerror = finish; }
+      window.speechSynthesis.speak(u);
+    });
+    const poll = setInterval(() => {
+      if (!window.speechSynthesis.speaking && !window.speechSynthesis.pending)
+        finish();
+    }, 500);
+  });
 }
 
-/* ---------------- chat ---------------- */
-$("composer").addEventListener("submit", async (ev) => {
-  ev.preventDefault();
-  const input = $("prompt");
-  const text = input.value.trim();
-  if (!text) return;
-  input.value = "";
+/* ---------------- chat ----------------
+ * One way in for typed and spoken questions alike. Resolves with the
+ * reply text, or null if it failed (and has already said why). */
+async function sendChat(text) {
   sayText("you", "me", text);
 
   const send = $("send");
@@ -577,7 +665,6 @@ $("composer").addEventListener("submit", async (ev) => {
   try {
     const r = await api("/api/chat", { prompt: text });
     pending.remove();
-    speak(r.reply);
     say("crabora", "bot", (b) => {
       (r.reply || "").split(/\n{2,}/).forEach((p) =>
         b.appendChild(el("p", null, p)));
@@ -586,14 +673,28 @@ $("composer").addEventListener("submit", async (ev) => {
           `looked at: ${r.tools_used.join(", ")}`));
       }
     });
+    return r.reply || "";
   } catch (e) {
     pending.remove();
     sayText("crabora", "bot bad", e.message);
+    return null;
   } finally {
     send.disabled = false;
-    input.focus();
     refreshLights();
   }
+}
+
+$("composer").addEventListener("submit", async (ev) => {
+  ev.preventDefault();
+  const input = $("prompt");
+  const text = input.value.trim();
+  if (!text) return;
+  input.value = "";
+  const reply = await sendChat(text);
+  // In a conversation the loop does the speaking for its own turns; a
+  // typed question in the middle of one is answered aloud too.
+  if (reply && (speakReplies || talkMode)) speak(reply);
+  input.focus();
 });
 
 refreshLights();
