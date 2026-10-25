@@ -18,6 +18,12 @@ says which way.
 not gravity itself, so the axis pointing UP reads +1 g. Expecting -1 g
 is a classic sign error and inverts every tilt reading.)
 
+What gravity CANNOT show is a turn about Z: a board rotated 180 degrees
+flat on the deck still reads +1 g on Z and passes here, while every
+pitch and roll comes out reversed. That is set by MOUNT_YAW_DEG in
+imu_lib.py -- check it by tipping the nose up and seeing pitch go
+positive.
+
 Body frame, from walk/README.md:
     +X forward, out through the point between legs 1 and 6
     +Y to the left

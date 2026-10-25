@@ -67,6 +67,19 @@ DEFAULT_BUS = 1
 CALIBRATION_PATH = os.path.join(
     os.path.dirname(os.path.abspath(__file__)), "imu_calibration.json")
 
+# How the board is turned on the deck, about +Z (up), counter-clockwise
+# from above: the angle from the body's +X (forward) to the sensor's own
+# X arrow. CRABORA's board sits turned round, 180 -- found 2026-10-25
+# when the web tilt gauge showed nose-up as nose-down and the roll
+# reversed too. A half turn flips X and Y and leaves Z alone, which is
+# exactly that, and which test_06's gravity check cannot see (it only
+# proves +Z is up).
+#
+# Applied AFTER calibration: the accelerometer offsets and gyro bias are
+# measured on raw sensor axes (calibrate_imu.py, zero_gyro()), so they
+# stay valid whatever this says.
+MOUNT_YAW_DEG = 180
+
 # Below this the robot is treated as stationary, so heading is not
 # integrated. Stops bias noise from wandering the heading while standing.
 STILL_RATE_DEG = 0.8
@@ -76,6 +89,16 @@ STILL_RATE_DEG = 0.8
 # worse than no calibration at all, because it is then subtracted from
 # every future reading.
 MAX_PLAUSIBLE_BIAS = 15.0
+
+
+_MOUNT_C = round(math.cos(math.radians(MOUNT_YAW_DEG)), 9)
+_MOUNT_S = round(math.sin(math.radians(MOUNT_YAW_DEG)), 9)
+
+
+def _to_body(v):
+    """Sensor axes -> body axes, undoing MOUNT_YAW_DEG."""
+    x, y, z = v
+    return [_MOUNT_C * x - _MOUNT_S * y, _MOUNT_S * x + _MOUNT_C * y, z]
 
 
 class ImuError(RuntimeError):
@@ -222,6 +245,8 @@ class Imu:
                for i, v in enumerate((ax, ay, az))]
         gyro = [(v / GYRO_SCALE) - self.gyro_bias[i]
                 for i, v in enumerate((gx, gy, gz))]
+        acc = _to_body(acc)
+        gyro = _to_body(gyro)
         now = time.monotonic()
         r = Reading(acc[0], acc[1], acc[2], gyro[0], gyro[1], gyro[2],
                     t_raw / TEMP_SCALE + TEMP_OFFSET, now)
