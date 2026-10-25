@@ -300,42 +300,20 @@ document.addEventListener("visibilitychange", () => {
 });
 refreshTilt();
 
-/* ---------------- arming ---------------- */
-/* The server decides whether motion is allowed; this just reflects it and
- * keeps the buttons honest. Never assume armed state locally -- a window
- * can expire between polls, and a disabled button is a courtesy, not a
- * guarantee. */
-let armedUntil = 0;
-
+/* ---------------- motion enable ----------------
+ * There is no ARM button: the server runs always-armed (safety.py,
+ * ALWAYS_ARMED in app.py). The motion buttons still follow what the
+ * server reports rather than assuming it, so turning the gate back on
+ * server-side greys them out again without touching this file. */
 function setArmed(safety) {
   const armed = !!(safety && safety.armed);
-  armedUntil = armed ? Date.now() + safety.seconds_left * 1000 : 0;
-  $("arm").textContent = armed ? `ARMED ${safety.seconds_left}s` : "ARM";
-  $("arm").classList.toggle("on", armed);
   document.querySelectorAll("[data-motion]").forEach((b) => {
     b.disabled = !armed;
+    b.title = armed ? (b.dataset.tip || "") : (safety && safety.reason) || "";
   });
 }
-
-function tickArm() {
-  if (!armedUntil) return;
-  const left = Math.max(0, Math.round((armedUntil - Date.now()) / 1000));
-  $("arm").textContent = left ? `ARMED ${left}s` : "ARM";
-  if (!left) { armedUntil = 0; refreshLights(); }
-}
-setInterval(tickArm, 1000);
-
-$("arm").addEventListener("click", async () => {
-  const armed = armedUntil > Date.now();
-  try {
-    const r = await api(armed ? "/api/disarm" : "/api/arm", {});
-    setArmed(r.safety);
-    sayText("crabora", "bot", armed
-      ? "Disarmed. Nothing will move until you arm again."
-      : `Armed for ${r.safety.seconds_left}s. Motion is allowed until it expires.`);
-  } catch (e) {
-    sayText("crabora", "bot bad", e.message);
-  }
+document.querySelectorAll("[data-motion]").forEach((b) => {
+  b.dataset.tip = b.title;
 });
 
 /* ---------------- motion buttons ---------------- */
@@ -579,7 +557,7 @@ async function conversation(id) {
       return;
     }
     micState("", "Replying…");
-    await speak(reply);
+    await speak(reply.spoken);
   }
 }
 
@@ -652,9 +630,45 @@ function speak(text) {
   });
 }
 
+/* ---------------- markdown ----------------
+ * Bot replies are Markdown, with inline SVG allowed for small diagrams.
+ * Sanitised before it touches the DOM: the model's output is untrusted
+ * HTML like any other, and an SVG can carry script. */
+const canMarkdown = !!(window.marked && window.DOMPurify);
+if (canMarkdown) {
+  marked.setOptions({ gfm: true, breaks: false });
+  // Links open in a new tab so following one does not lose the chat.
+  DOMPurify.addHook("afterSanitizeAttributes", (n) => {
+    if (n.tagName === "A" && n.getAttribute("href")) {
+      n.setAttribute("target", "_blank");
+      n.setAttribute("rel", "noopener noreferrer");
+    }
+  });
+}
+
+function renderMarkdown(body, text) {
+  if (!canMarkdown) {
+    (text || "").split(/\n{2,}/).forEach((p) => body.appendChild(el("p", null, p)));
+    return;
+  }
+  const wrap = el("div", "md");
+  wrap.innerHTML = DOMPurify.sanitize(marked.parse(text || ""), {
+    USE_PROFILES: { html: true, svg: true, svgFilters: true },
+  });
+  // Wide tables scroll inside the bubble rather than stretching the page.
+  wrap.querySelectorAll("table").forEach((t) => {
+    const s = el("div", "table-scroll");
+    t.replaceWith(s);
+    s.appendChild(t);
+  });
+  body.appendChild(wrap);
+}
+
 /* ---------------- chat ----------------
- * One way in for typed and spoken questions alike. Resolves with the
- * reply text, or null if it failed (and has already said why). */
+ * One way in for typed and spoken questions alike. Resolves with
+ * {reply, spoken}, or null if it failed (and has already said why).
+ * `spoken` is the ~20-word summary the server split off the reply; only
+ * that is read aloud, never the full Markdown. */
 async function sendChat(text) {
   sayText("you", "me", text);
 
@@ -666,14 +680,13 @@ async function sendChat(text) {
     const r = await api("/api/chat", { prompt: text });
     pending.remove();
     say("crabora", "bot", (b) => {
-      (r.reply || "").split(/\n{2,}/).forEach((p) =>
-        b.appendChild(el("p", null, p)));
+      renderMarkdown(b, r.reply);
       if (r.tools_used && r.tools_used.length) {
         b.appendChild(el("div", "tools",
           `looked at: ${r.tools_used.join(", ")}`));
       }
     });
-    return r.reply || "";
+    return { reply: r.reply || "", spoken: r.spoken || r.reply || "" };
   } catch (e) {
     pending.remove();
     sayText("crabora", "bot bad", e.message);
@@ -693,7 +706,7 @@ $("composer").addEventListener("submit", async (ev) => {
   const reply = await sendChat(text);
   // In a conversation the loop does the speaking for its own turns; a
   // typed question in the middle of one is answered aloud too.
-  if (reply && (speakReplies || talkMode)) speak(reply);
+  if (reply && (speakReplies || talkMode)) speak(reply.spoken);
   input.focus();
 });
 

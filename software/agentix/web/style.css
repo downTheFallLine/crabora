@@ -172,6 +172,63 @@ pre {
 
 .thinking .body { color: var(--muted); font-style: italic; }
 
+/* ---------------- markdown replies ---------------- */
+.md > :first-child { margin-top: 0; }
+.md > :last-child  { margin-bottom: 0; }
+.md p, .md ul, .md ol, .md pre, .md blockquote, .md .table-scroll,
+.md svg { margin: 0 0 10px; }
+.md h1, .md h2, .md h3, .md h4 {
+  margin: 14px 0 6px;
+  font-size: 15px;
+  line-height: 1.35;
+  font-weight: 650;
+}
+.md h1 { font-size: 17px; }
+.md h2 { font-size: 16px; }
+.md ul, .md ol { padding-left: 22px; }
+.md li + li { margin-top: 3px; }
+.md a { color: var(--accent); }
+.md code {
+  font: 12.5px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace;
+  background: var(--panel-2);
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  padding: 1px 5px;
+}
+.md pre {
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 9px 11px;
+  overflow-x: auto;
+}
+.md pre code { background: none; border: 0; padding: 0; }
+.md blockquote {
+  padding-left: 11px;
+  border-left: 3px solid var(--line);
+  color: var(--muted);
+}
+.md hr { border: 0; border-top: 1px solid var(--line); margin: 12px 0; }
+.md .table-scroll { overflow-x: auto; }
+.md table { border-collapse: collapse; font-size: 13.5px; }
+.md th, .md td {
+  padding: 5px 10px;
+  border-bottom: 1px solid var(--line);
+  text-align: left;
+  font-variant-numeric: tabular-nums;
+}
+.md th { color: var(--muted); font-weight: 600; font-size: 12px; }
+/* A diagram from the model: never wider than the bubble, and on the
+   dark theme by default -- an SVG with no fill would draw black on
+   near-black. */
+.md svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  color: var(--text);
+}
+.md img { max-width: 100%; border-radius: 6px; }
+
 /* ---------------- composer ---------------- */
 .composer {
   display: flex;

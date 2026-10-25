@@ -20,9 +20,10 @@ Endpoints:
 arbiter, so it works when the model is slow, confused, unreachable, or
 out of credit. That is the whole point of it being a button.
 
-Motion is gated by arming: POST /api/arm opens a time window, and
-nothing moves outside one. The agent cannot call /api/arm -- that route
-exists for the human on the control strip. See safety.py and motion.py.
+Motion is NOT gated: ALWAYS_ARMED (below) is on, so motion is allowed
+at any time and STOP is the brake. With it off, POST /api/arm opens a
+time window and nothing moves outside one; the agent cannot call
+/api/arm. See safety.py and motion.py.
 
 Usage:
     python3 agentix/app.py
@@ -60,7 +61,14 @@ ARB = None
 AGENT = None
 # The arming gate. Lives here, beside the HTTP routes, because arming is
 # a human action over a route the tool layer cannot call.
-SAFE = Safety()
+#
+# ALWAYS_ARMED turns the gate off: motion is allowed at any time, the
+# agent included, with no ARM step. Tom's call, 2026-10-25. STOP still
+# drops torque. Set False to bring back the time-window gate -- and put
+# the ARM button back in web/index.html, since /api/arm is then the only
+# way to open it.
+ALWAYS_ARMED = True
+SAFE = Safety(always_armed=ALWAYS_ARMED)
 # Why the agent is off, in the words of whatever actually failed. Without
 # this the reason reached only the Pi's console at startup, so a browser
 # on another machine could not tell a missing API key from a missing
@@ -235,6 +243,8 @@ def chat():
             "reply": ("No model is configured, so I can't answer in prose "
                       "yet — but the tools work. Try the buttons, or POST "
                       "to /api/tools/<name>."),
+            "spoken": "No model is configured, so chat is off. The buttons "
+                      "still work.",
             "tools_used": [],
             "degraded": True,
         })
@@ -252,9 +262,11 @@ def stop():
     """EMERGENCY STOP. Deliberately not routed through the agent: it has
     to work when the model is slow, confused or unreachable.
 
-    Disarms as well as releasing torque. Someone who hits STOP wants the
-    robot to stop, not to stop and then be free to move again the moment
-    the next sentence is typed. Re-arming is a deliberate act."""
+    Disarms as well as releasing torque. With the gate on, someone who
+    hits STOP wants the robot to stop, not to stop and then be free to
+    move again the moment the next sentence is typed, so re-arming is a
+    deliberate act. With ALWAYS_ARMED the disarm is recorded but does not
+    block: the next motion request moves the robot."""
     SAFE.disarm("emergency stop")
     if not ARB.available:
         return _fail(f"bus unavailable: {ARB.reason} -- CUT THE SERVO POWER", 503)

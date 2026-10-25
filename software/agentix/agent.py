@@ -20,6 +20,7 @@ every tool and the control strip keep working.
 """
 
 import os
+import re
 import sys
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
@@ -51,10 +52,11 @@ WORKSPACE_ID = os.environ.get("ANTHROPIC_WORKSPACE_ID")
 
 SYSTEM = """You are the voice of CRABORA, a six-legged walking robot.
 
-You can look at the robot AND move it, but only while a human has armed
-motion on the control strip. If a motion tool comes back saying it is not
-armed, say so plainly and ask them to press ARM -- you cannot arm it
-yourself, and should not pretend otherwise or keep retrying.
+You can look at the robot AND move it. There is no arming step: motion
+tools work whenever you call them, so a move happens the moment you ask
+for it. The human has a STOP button that drops all torque. If a motion
+tool reports it was stopped or refused, say so plainly rather than
+retrying.
 
 Moving the robot is real and it breaks: two tibias have already snapped.
 So:
@@ -90,7 +92,20 @@ with caveats, and do not list everything you checked unless it helps.
 
 One thing worth flagging when it comes up, because it is known and
 unresolved: the servo power converter is not regulating (it has about
-1 V of headroom against a 2 V dropout requirement)."""
+1 V of headroom against a 2 V dropout requirement).
+
+Formatting: your reply is rendered as Markdown in a chat window, so use
+it where it helps -- tables for per-leg or per-joint numbers, lists,
+`code` for IDs and commands. For a picture, such as a leg layout or a
+foot plot, you may include a small inline <svg> (keep it under ~60
+lines, no scripts). Plain prose is fine when that is clearest.
+
+Spoken summary: the reply is also read aloud, but only a summary is
+spoken, not the Markdown. End EVERY reply with one final line of the
+form
+SAY: <the answer in about 20 words of plain speech>
+No Markdown, numbers written as you would say them, no "SAY:" anywhere
+else. It is stripped from the chat before display."""
 
 
 # Schemas are where the safe range lives. Stating the bounds here means
@@ -247,7 +262,8 @@ class Agent:
             messages.append(reply)
             calls = getattr(reply, "tool_calls", None) or []
             if not calls:
-                return {"reply": _text(reply), "tools_used": used}
+                text, spoken = split_spoken(_text(reply))
+                return {"reply": text, "spoken": spoken, "tools_used": used}
 
             for call in calls:
                 name = call.get("name")
@@ -266,11 +282,9 @@ class Agent:
                 messages.append(ToolMessage(
                     content=str(result), tool_call_id=call.get("id", name)))
 
-        return {
-            "reply": ("I kept needing more information and ran out of steps. "
-                      "Try asking something narrower."),
-            "tools_used": used,
-        }
+        msg = ("I kept needing more information and ran out of steps. "
+               "Try asking something narrower.")
+        return {"reply": msg, "spoken": msg, "tools_used": used}
 
 
 def _text(message: AIMessage) -> str:
@@ -285,6 +299,48 @@ def _text(message: AIMessage) -> str:
         elif isinstance(block, dict) and block.get("type") == "text":
             parts.append(block.get("text", ""))
     return "\n".join(p for p in parts if p).strip()
+
+
+# The SAY: line the system prompt asks for. Last one wins, and it is
+# matched anywhere on its own line, not only at the very end, because a
+# model that adds a trailing remark after it should not get the remark
+# read out instead.
+_SAY = re.compile(r"^[ \t>*_]*SAY:[ \t*_]*(.+?)[ \t*_]*$", re.MULTILINE)
+SPOKEN_WORDS = 30      # fallback cap, a little over the asked-for 20
+
+
+def split_spoken(text):
+    """(reply for display, short text to speak).
+
+    The display text has the SAY: line removed. If the model forgot it,
+    fall back to the opening sentences with the Markdown stripped, so
+    the voice never reads out a table or an SVG.
+    """
+    found = list(_SAY.finditer(text))
+    if found:
+        last = found[-1]
+        spoken = last.group(1).strip()
+        shown = (text[:last.start()] + text[last.end():]).strip()
+        return shown, spoken
+    return text, plain_summary(text)
+
+
+def plain_summary(text, words=SPOKEN_WORDS):
+    t = re.sub(r"<svg.*?</svg>", " ", text, flags=re.S | re.I)
+    t = re.sub(r"```.*?```", " ", t, flags=re.S)
+    t = "\n".join(line for line in t.splitlines()     # tables, headings
+                  if not line.lstrip().startswith(("|", "#")))
+    t = re.sub(r"!?\[([^\]]*)\]\([^)]*\)", r"\1", t)     # links, images
+    t = re.sub(r"[#*_`>~]+", "", t)
+    t = re.sub(r"^\s*[-+]\s+", "", t, flags=re.M)
+    t = " ".join(t.split())
+    out = []
+    for sentence in re.split(r"(?<=[.!?])\s+", t):
+        out.append(sentence)
+        if len(" ".join(out).split()) >= words * 2 // 3:
+            break
+    w = " ".join(out).split()
+    return " ".join(w[:words]) + ("…" if len(w) > words else "")
 
 
 def build_agent(arbiter, safety=None):

@@ -156,13 +156,17 @@ answer than a 500.
 
 ## Motion
 
-Motion is gated. Three different kinds of check stand between a sentence
-in the chat box and a servo moving:
+Three different kinds of check can stand between a sentence in the
+chat box and a servo moving. The first is currently **off**:
 
-1. **ARMED** (`safety.py`) — a human pressed ARM, opening a time window.
-   The agent cannot arm itself: `/api/arm` is a route the tool layer has
-   no way to call. The window expires on idle (5 min), has a hard
-   session ceiling (30 min), and is dropped immediately by STOP.
+1. **ARMED** (`safety.py`) — **disabled: `ALWAYS_ARMED = True` in
+   `app.py`, since 2026-10-25.** There is no ARM button; motion, the
+   agent's included, is allowed at any time, and STOP is the brake. With
+   the gate on, a human presses ARM to open a time window the agent
+   cannot open itself (`/api/arm` is a route the tool layer has no way to
+   call); it expires on idle (5 min), has a hard session ceiling
+   (30 min), and STOP drops it. To bring it back, set `ALWAYS_ARMED =
+   False` and restore the ARM button in `web/index.html`.
 2. **PREFLIGHT** (`motion.py`) — bus up, nothing latched, nothing over
    65 °C, supply not sagging below 6.2 V. A brownout reads exactly like
    a wiring fault, so it is worth refusing rather than debugging.
@@ -203,6 +207,21 @@ Long motions poll `arbiter.stopping` between steps. STOP sets that flag
 lock would make STOP wait for it, which is the one thing it must never
 do. The motion drops out at its next step, then STOP takes the bus and
 releases torque.
+
+## Replies: Markdown, and a spoken summary
+
+Replies are Markdown, rendered in the chat: tables, lists, code, and
+small inline SVG diagrams. The page loads `marked` and `DOMPurify`
+(pinned) from cdnjs and sanitises every reply before it reaches the
+page; without internet on the browser's machine it falls back to plain
+paragraphs.
+
+Only a short summary is spoken, never the Markdown. The model ends each
+reply with a `SAY:` line of about 20 words (asked for in the system
+prompt); `agent.split_spoken()` strips it out and returns it as
+`spoken` beside `reply`. One call, so no extra latency. If the model
+leaves the line off, the opening sentences are spoken instead, with
+tables, code and SVG removed.
 
 ## Voice
 

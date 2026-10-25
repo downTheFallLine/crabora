@@ -18,6 +18,13 @@ human action every time.
 
 Nothing here touches the bus. It answers one question -- may motion
 happen right now -- and records why not.
+
+ALWAYS-ARMED MODE (always_armed=True) switches the gate off: require()
+always passes, and STOP still releases torque but no longer leaves
+motion locked until someone re-arms. Tom chose this on 2026-10-25 --
+the robot is on his bench, and the ARM step was friction, not safety he
+wanted. The window logic stays so the gate can come back by flipping
+ALWAYS_ARMED in app.py.
 """
 
 import threading
@@ -38,8 +45,10 @@ class NotArmed(RuntimeError):
 
 
 class Safety:
-    def __init__(self, window=DEFAULT_WINDOW, max_session=MAX_SESSION):
+    def __init__(self, window=DEFAULT_WINDOW, max_session=MAX_SESSION,
+                 always_armed=False):
         self._lock = threading.Lock()
+        self.always_armed = always_armed
         self._window = window
         self._max_session = max_session
         self._until = 0.0          # monotonic deadline
@@ -70,6 +79,8 @@ class Safety:
     # --- motion side -------------------------------------------------
     def require(self):
         """Raise NotArmed unless motion is permitted right now."""
+        if self.always_armed:
+            return True
         with self._lock:
             now = time.monotonic()
             if self._until <= now:
@@ -95,6 +106,10 @@ class Safety:
             return self._state_locked(time.monotonic())
 
     def _state_locked(self, now):
+        if self.always_armed:
+            return {"armed": True, "always_armed": True, "seconds_left": 0,
+                    "armed_by": None, "reason": None,
+                    "window_seconds": round(self._window)}
         armed = self._until > now
         return {
             "armed": armed,

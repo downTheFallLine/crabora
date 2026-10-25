@@ -30,10 +30,9 @@
     <button class="btn" data-tool="foot_positions">Feet</button>
     <button class="btn" data-tool="imu_state">IMU</button>
 
-    <!-- Motion. Disabled until a human arms it; the server enforces the
-         same rule, so this is a courtesy, not the gate. -->
+    <!-- Motion. Always enabled -- the server runs without an arming
+         gate (ALWAYS_ARMED in app.py). STOP is the brake. -->
     <span class="sep" aria-hidden="true"></span>
-    <button class="btn arm" id="arm" title="Allow motion for a few minutes">ARM</button>
     <button class="btn move" data-motion="stand_up" disabled>Stand Up</button>
     <button class="btn move" data-motion="lay_down" disabled>Lay Down</button>
     <button class="btn move" data-motion="walk" disabled
@@ -96,9 +95,8 @@
     <div class="msg bot">
       <div class="who">crabora</div>
       <div class="body">
-        <p>I can look at the robot, and move it once you press
-           <strong>ARM</strong>. Arming lasts a few minutes and I can’t
-           do it myself.</p>
+        <p>I can look at the robot and move it. <strong>STOP</strong>
+           drops all the servos at once if anything looks wrong.</p>
         <p>Ask me things like <em>“is anything faulted?”</em>,
            <em>“nudge leg 3’s femur up 10 degrees”</em> or
            <em>“lay down, then stand back up at 90mm”</em></p>
@@ -113,6 +111,12 @@
   </form>
 </main>
 
+<!-- Markdown for bot replies: marked parses, DOMPurify sanitises (the
+     reply can carry inline SVG, and model output is still untrusted
+     HTML). Pinned versions. If they fail to load -- no internet on the
+     machine with the browser -- replies fall back to plain paragraphs. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/dompurify/3.1.6/purify.min.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
