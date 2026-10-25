@@ -75,11 +75,41 @@ is swapped for a heavy one.
 (3 A absolute). Enough for coxa and femur bring-up and a short walk; not
 enough for reliable walking or scurry.
 
-**Planned:** a 300 W "20 A" CC/CV step-down module (6-40 V in), set to
-7.4 V. These are really 15 A continuous, with a fan needed above that. Use
-the CC knob as a current limit, the way the old 5 A bench supply was one.
-Add a 1000-2200 uF / 16 V+ capacitor across the output to soak up the
-spikes when many servos start at once.
+**Ordered (2026-10-25):** XINGYHENG 20A 300W high-power buck converter
+module (Amazon B081X5YX8V), to replace the LM2596. Set to 7.4 V.
+
+| Spec | Value | Source |
+| --- | --- | --- |
+| Input | DC 6-40 V | listing title |
+| Output | DC 1.2-36 V, adjustable | listing title |
+| Current / power | 20 A, 300 W | listing title; continuous vs peak not stated |
+| Modes | constant voltage + constant current (CV/CC) | listing title |
+| Protection | short circuit | listing title |
+| Continuous rating, cooling, efficiency, size, weight | **unconfirmed** | check the module and its paperwork when it arrives |
+
+What to expect from this class of module (not confirmed for this one):
+"20 A" is usually the peak; ~12-15 A continuous on the bare heatsink, more
+only with a fan. Walking (~10-12 A) should be comfortable; scurry peaks
+are at the edge, so give it airflow.
+
+**It needs the 3S pack to regulate.** With 6 V minimum input and the usual
+~1.5-2 V of headroom, 2S (8.4 V full) at 7.4 V out puts it in dropout
+like the LM2596. Install it with the 3S packs, not before.
+
+Setting it up, **before any servo is connected**:
+
+1. Feed it from the 3S pack through the fuse, output open.
+2. Turn the CV pot until a meter on the output reads **7.4 V**. Never above
+   8.0 V: the STS3215s trip over-voltage at 8 V.
+3. Use the CC pot as a current limit, the way the old 5 A bench supply was
+   one. Start around **8 A** for bring-up (stand / lay down), raise toward
+   15 A once walking is proven on it. (Setting CC means briefly shorting
+   the output through a meter on its 10-20 A range; follow the module's
+   instructions.)
+4. Add a 1000-2200 uF / 16 V+ capacitor across the output to soak up the
+   spikes when many servos start at once.
+5. Connect the URTs, power up with the robot lying down, and check
+   `software/utils/read_servo_voltage.py <id>` reads ~7.4 V.
 
 Path: buck -> each FE-URT-2's power input -> the URT's two bus ports ->
 one leg per port -> coxa -> femur -> tibia. 3 URTs x 2 legs = 6 legs.
@@ -134,8 +164,14 @@ Gotchas:
 
 ## Open items
 
-- PRIPOWER: buy the 3S packs, charger, fuse, and alarm.
-- LOCOPOWER: buy the 20 A buck; measure real currents with a watt meter.
+- PRIPOWER: buy the 3S packs, charger, fuse, and alarm. The new buck
+  needs the 3S packs to regulate.
+- LOCOPOWER: install the XINGYHENG 20 A buck when it arrives (ordered
+  2026-10-25); confirm its continuous rating and cooling; measure real
+  currents with a watt meter.
+- agentix: once the new buck regulates, update the agent's system prompt
+  (`software/agentix/agent.py`), which still says the servo converter "is
+  not regulating".
 - LOGIPOWER: confirm the 5 V BEC's model and current rating before the
   camera goes on.
 - Add the INA226 pack-voltage check to the motion preflight.
