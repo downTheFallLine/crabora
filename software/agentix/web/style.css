@@ -430,6 +430,15 @@ details.raw pre { margin-top: 8px; }
 }
 
 .btn.voice { min-width: 92px; }
+.btn.voice-pick {
+  max-width: 190px;
+  padding-right: 8px;
+  text-overflow: ellipsis;
+}
+.btn.voice-pick option, .btn.voice-pick optgroup {
+  background: var(--panel);
+  color: var(--text);
+}
 .btn.voice.on {
   border-color: var(--accent);
   color: var(--accent);

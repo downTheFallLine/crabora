@@ -596,6 +596,86 @@ $("speak").addEventListener("click", () => {
   if (!speakReplies && !talkMode) window.speechSynthesis.cancel();
 });
 
+/* --- voice picker ---
+ * Every voice the browser has, grouped so the fun ones are easy to find.
+ * Chrome on a Mac lists ~200, most of them other languages; English
+ * comes first, and the macOS novelty voices get their own groups.
+ * Picking one says a line in it. The choice is remembered per browser
+ * (localStorage) -- a convenience, so it fails quietly where storage is
+ * blocked. Voices load asynchronously in Chrome, hence voiceschanged.
+ */
+const VOICE_KEY = "crabora.voice";
+const ROBOT_VOICES = ["Zarvox", "Trinoids", "Fred", "Ralph", "Albert",
+                      "Junior", "Kathy"];
+const FUN_VOICES = ["Whisper", "Bubbles", "Bells", "Boing", "Organ",
+                    "Cellos", "Good News", "Bad News", "Jester", "Superstar",
+                    "Wobble", "Bahh", "Grandma", "Grandpa"];
+const SAMPLE_LINES = [
+  "Hello. I am Crabora. All six legs reporting.",
+  "Servos warm. Feet planted. Awaiting orders.",
+  "I have six legs and no regrets.",
+  "Scuttling is just walking with confidence.",
+];
+let voices = [], chosenVoice = null;
+
+const baseName = (v) => v.name.replace(/\s*\(.*\)$/, "");
+const inList = (list, v) => list.includes(baseName(v));
+
+function loadVoices() {
+  if (!canSpeak) return;
+  voices = window.speechSynthesis.getVoices();
+  if (!voices.length) return;
+
+  let saved = null;
+  try { saved = localStorage.getItem(VOICE_KEY); } catch { /* blocked */ }
+
+  const pick = $("voice-pick");
+  pick.textContent = "";
+  pick.appendChild(new Option("Default voice", ""));
+  const english = voices.filter((v) => v.lang.startsWith("en"));
+  const groups = [
+    ["Robot", english.filter((v) => inList(ROBOT_VOICES, v))],
+    ["Speaking", english.filter((v) => !inList(ROBOT_VOICES, v) &&
+                                       !inList(FUN_VOICES, v))],
+    ["Silly", english.filter((v) => inList(FUN_VOICES, v))],
+    ["Other languages", voices.filter((v) => !v.lang.startsWith("en"))
+                              .sort((a, b) => a.lang.localeCompare(b.lang))],
+  ];
+  for (const [label, list] of groups) {
+    if (!list.length) continue;
+    const g = document.createElement("optgroup");
+    g.label = label;
+    for (const v of list) {
+      const tag = v.lang.startsWith("en") ? v.lang.slice(3) : v.lang;
+      g.appendChild(new Option(
+        // "Eddy (English (United States))" -> "Eddy · US": the tag
+        // already says which, and the long form crowds the menu.
+        `${baseName(v)}${tag ? ` · ${tag}` : ""}${v.localService ? "" : " ☁"}`,
+        v.voiceURI));
+    }
+    pick.appendChild(g);
+  }
+  chosenVoice = voices.find((v) => v.voiceURI === saved) || null;
+  pick.value = chosenVoice ? chosenVoice.voiceURI : "";
+  pick.hidden = false;
+}
+
+if (canSpeak) {
+  loadVoices();
+  window.speechSynthesis.addEventListener("voiceschanged", loadVoices);
+  $("voice-pick").addEventListener("change", () => {
+    const uri = $("voice-pick").value;
+    chosenVoice = voices.find((v) => v.voiceURI === uri) || null;
+    try {
+      if (uri) localStorage.setItem(VOICE_KEY, uri);
+      else localStorage.removeItem(VOICE_KEY);
+    } catch { /* blocked */ }
+    // Do not talk over a conversation turn; otherwise, a sample.
+    if (!talkMode)
+      speak(SAMPLE_LINES[Math.floor(Math.random() * SAMPLE_LINES.length)]);
+  });
+}
+
 /* Speak text; resolves when it has finished (or been cancelled), so the
  * conversation knows when it may listen again.
  *
@@ -619,7 +699,12 @@ function speak(text) {
     parts.forEach((p, i) => {
       const u = new SpeechSynthesisUtterance(p.trim());
       u.rate = 1.0;
-      u.pitch = 0.9;        // a shade below default; it is a robot
+      if (chosenVoice) {
+        u.voice = chosenVoice;
+        u.lang = chosenVoice.lang;
+      } else {
+        u.pitch = 0.9;      // a shade below default; it is a robot
+      }
       if (i === parts.length - 1) { u.onend = finish; u.onerror = finish; }
       window.speechSynthesis.speak(u);
     });

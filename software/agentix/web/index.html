@@ -50,6 +50,10 @@
     </button>
     <button class="btn voice" id="speak" title="Read replies aloud"
             aria-pressed="false">Voice off</button>
+    <!-- Filled from the browser's own voices once they load; empty and
+         hidden where speech synthesis does not exist. -->
+    <select class="btn voice-pick" id="voice-pick" aria-label="Voice"
+            title="Pick the robot's voice" hidden></select>
   </div>
 </header>
 
