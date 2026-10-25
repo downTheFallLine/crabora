@@ -616,7 +616,25 @@ const SAMPLE_LINES = [
   "I have six legs and no regrets.",
   "Scuttling is just walking with confidence.",
 ];
-let voices = [], chosenVoice = null;
+// A preset is a voice plus a manner of speaking. `prefer` is tried in
+// order, since which voices exist depends on the machine; the first one
+// present wins. Stored in the picker as "preset:<key>".
+const PRESETS = {
+  hal: {
+    label: "HAL · calm, slow, low",
+    prefer: ["Daniel", "Reed", "Google UK English Male", "Eddy", "Rocko"],
+    rate: 0.85,
+    pitch: 0.85,
+    samples: [
+      "Good evening. All six legs are functioning normally.",
+      "I am watching the servo bus very closely.",
+      "I think we should let the femurs cool before standing.",
+    ],
+  },
+};
+
+// What speak() uses: {voice, rate, pitch}, or null for the default.
+let voices = [], chosen = null;
 
 const baseName = (v) => v.name.replace(/\s*\(.*\)$/, "");
 const inList = (list, v) => list.includes(baseName(v));
@@ -632,6 +650,12 @@ function loadVoices() {
   const pick = $("voice-pick");
   pick.textContent = "";
   pick.appendChild(new Option("Default voice", ""));
+  const presets = document.createElement("optgroup");
+  presets.label = "Presets";
+  for (const [key, p] of Object.entries(PRESETS)) {
+    if (presetVoice(p)) presets.appendChild(new Option(p.label, `preset:${key}`));
+  }
+  if (presets.children.length) pick.appendChild(presets);
   const english = voices.filter((v) => v.lang.startsWith("en"));
   const groups = [
     ["Robot", english.filter((v) => inList(ROBOT_VOICES, v))],
@@ -655,24 +679,46 @@ function loadVoices() {
     }
     pick.appendChild(g);
   }
-  chosenVoice = voices.find((v) => v.voiceURI === saved) || null;
-  pick.value = chosenVoice ? chosenVoice.voiceURI : "";
+  chosen = resolveChoice(saved);
+  pick.value = chosen ? saved : "";
   pick.hidden = false;
+}
+
+function presetVoice(p) {
+  for (const name of p.prefer) {
+    const v = voices.find((x) => x.lang.startsWith("en") &&
+                                 (x.name === name || baseName(x) === name));
+    if (v) return v;
+  }
+  return null;
+}
+
+// Picker value -> {voice, rate, pitch, samples}, or null for the default.
+function resolveChoice(value) {
+  if (!value) return null;
+  if (value.startsWith("preset:")) {
+    const p = PRESETS[value.slice(7)];
+    const v = p && presetVoice(p);
+    return v ? { voice: v, rate: p.rate, pitch: p.pitch, samples: p.samples }
+             : null;
+  }
+  const v = voices.find((x) => x.voiceURI === value);
+  return v ? { voice: v, rate: 1.0, pitch: 1.0 } : null;
 }
 
 if (canSpeak) {
   loadVoices();
   window.speechSynthesis.addEventListener("voiceschanged", loadVoices);
   $("voice-pick").addEventListener("change", () => {
-    const uri = $("voice-pick").value;
-    chosenVoice = voices.find((v) => v.voiceURI === uri) || null;
+    const value = $("voice-pick").value;
+    chosen = resolveChoice(value);
     try {
-      if (uri) localStorage.setItem(VOICE_KEY, uri);
+      if (value) localStorage.setItem(VOICE_KEY, value);
       else localStorage.removeItem(VOICE_KEY);
     } catch { /* blocked */ }
     // Do not talk over a conversation turn; otherwise, a sample.
-    if (!talkMode)
-      speak(SAMPLE_LINES[Math.floor(Math.random() * SAMPLE_LINES.length)]);
+    const lines = (chosen && chosen.samples) || SAMPLE_LINES;
+    if (!talkMode) speak(lines[Math.floor(Math.random() * lines.length)]);
   });
 }
 
@@ -698,11 +744,13 @@ function speak(text) {
     };
     parts.forEach((p, i) => {
       const u = new SpeechSynthesisUtterance(p.trim());
-      u.rate = 1.0;
-      if (chosenVoice) {
-        u.voice = chosenVoice;
-        u.lang = chosenVoice.lang;
+      if (chosen) {
+        u.voice = chosen.voice;
+        u.lang = chosen.voice.lang;
+        u.rate = chosen.rate;
+        u.pitch = chosen.pitch;
       } else {
+        u.rate = 1.0;
         u.pitch = 0.9;      // a shade below default; it is a robot
       }
       if (i === parts.length - 1) { u.onend = finish; u.onerror = finish; }
