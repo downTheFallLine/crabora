@@ -82,7 +82,7 @@ from gait_lib import (  # noqa: E402
     TIBIA_JOINT_DIGIT, TRIPOD_A, TRIPOD_B, tripod_gap, ground_clearance,
     ADDR_GOAL_POSITION, ADDR_GOAL_SPEED, ADDR_MAX_ANGLE, ADDR_MIN_ANGLE,
     ADDR_TORQUE_ENABLE, BusError, PacketHandler, bus_stats, reset_bus_stats,
-    confirm, find_joints, find_urt_devices, open_ports, read1, read2,
+    confirm, find_joints, find_urt_devices, note_goal, open_ports, read1, read2,
     write1, write2,
 )
 from pose import Unreachable, pose_stand  # noqa: E402
@@ -316,6 +316,8 @@ def sync_write_goals(ports_ids, targets):
             params += bytes([sid, v & 0xFF, (v >> 8) & 0xFF])
         body = bytes([BROADCAST_ID, len(params) + 2, INST_SYNC_WRITE]) + params
         port.writePort(b"\xff\xff" + body + bytes([(~sum(body)) & 0xFF]))
+        for sid in sids:
+            note_goal(sid, targets[sid])     # passive; see gait_lib
 
 
 class Streamer:

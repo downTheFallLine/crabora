@@ -300,6 +300,143 @@ document.addEventListener("visibilitychange", () => {
 });
 refreshTilt();
 
+/* ---------------- leg animation ----------------
+ * Polls /api/leg/<n> four times a second while the page is visible and
+ * eases the drawing toward each reading, so a gait reads as motion
+ * rather than a slideshow. The server answers with MEASURED angles when
+ * the bus is free and the gait's COMMANDED goals while a motion holds
+ * it; the tag under the picker says which.
+ *
+ * Geometry is pose.leg_fk's, in mm: femur 100, tibia 120, femur angle
+ * up from level, tibia flex 0 = straight. Top view puts the front up,
+ * legs at their bearings (30 + (n-1)*60 degrees, clockwise from the
+ * front), coxa angle + = counter-clockwise from above.
+ */
+const LEG_POLL_MS = 250, LEG_IDLE_MS = 2000;
+const FEMUR_MM = 100, TIBIA_MM = 120;
+const HIP_R = 85, COXA_MM = 55;        // top view, drawn not to scale
+const LEG_KEY = "crabora.leg";
+let legTimer = null, legTarget = null, legShown = null, legRaf = null;
+
+const rad = (d) => d * Math.PI / 180;
+const fmt = (v) => `${v > 0 ? "+" : ""}${v.toFixed(0)}\u00b0`;
+
+// Body frame (X forward, Y left) -> screen (front up).
+const topXY = (x, y) => [-y, -x];
+
+(function drawBody() {
+  const hex = [];
+  for (let n = 1; n <= 6; n++) {
+    // Hexagon POINTS sit between legs (the front point is between 1 and
+    // 6), so the vertices are at the legs' bearings minus 30.
+    const b = rad(-(n - 1) * 60);
+    hex.push(topXY(HIP_R * 1.12 * Math.cos(b), HIP_R * 1.12 * Math.sin(b)).join(","));
+  }
+  $("leg-hex").setAttribute("points", hex.join(" "));
+})();
+
+function drawLegs(leg, coxaDeg) {
+  const g = $("leg-others");
+  g.textContent = "";
+  for (let n = 1; n <= 6; n++) {
+    const b = rad(-(30 + (n - 1) * 60));
+    const [hx, hy] = topXY(HIP_R * Math.cos(b), HIP_R * Math.sin(b));
+    if (n === leg) {
+      const phi = b + rad(coxaDeg);
+      const [ex, ey] = topXY(HIP_R * Math.cos(b) + COXA_MM * Math.cos(phi),
+                             HIP_R * Math.sin(b) + COXA_MM * Math.sin(phi));
+      const c = $("leg-coxa");
+      c.setAttribute("x1", hx); c.setAttribute("y1", hy);
+      c.setAttribute("x2", ex); c.setAttribute("y2", ey);
+      continue;
+    }
+    const [ex, ey] = topXY((HIP_R + COXA_MM * 0.8) * Math.cos(b),
+                           (HIP_R + COXA_MM * 0.8) * Math.sin(b));
+    const l = document.createElementNS("http://www.w3.org/2000/svg", "line");
+    l.setAttribute("class", "other");
+    l.setAttribute("x1", hx); l.setAttribute("y1", hy);
+    l.setAttribute("x2", ex); l.setAttribute("y2", ey);
+    g.appendChild(l);
+  }
+}
+
+function drawSide(femurUp, flex) {
+  const beta = rad(femurUp), gamma = beta - rad(flex);
+  const kx = FEMUR_MM * Math.cos(beta), ky = -FEMUR_MM * Math.sin(beta);
+  const fx = kx + TIBIA_MM * Math.cos(gamma), fy = ky - TIBIA_MM * Math.sin(gamma);
+  const set = (id, a) => Object.entries(a).forEach(([k, v]) => $(id).setAttribute(k, v));
+  set("leg-femur", { x2: kx, y2: ky });
+  set("leg-tibia", { x1: kx, y1: ky, x2: fx, y2: fy });
+  set("leg-knee", { cx: kx, cy: ky });
+  set("leg-foot", { cx: fx, cy: fy });
+}
+
+function legFrame() {
+  legRaf = null;
+  if (!legTarget) return;
+  const keys = ["coxa_deg", "femur_up_deg", "tibia_flex_deg"];
+  if (!legShown || legShown.leg !== legTarget.leg) legShown = { ...legTarget };
+  let moving = false;
+  for (const k of keys) {
+    const d = legTarget[k] - legShown[k];
+    legShown[k] = Math.abs(d) < 0.05 ? legTarget[k] : legShown[k] + d * 0.3;
+    if (legShown[k] !== legTarget[k]) moving = true;
+  }
+  drawSide(legShown.femur_up_deg, legShown.tibia_flex_deg);
+  drawLegs(legShown.leg, legShown.coxa_deg);
+  if (moving) legRaf = requestAnimationFrame(legFrame);
+}
+
+const LEG_SOURCE = {
+  "measured": "measured",
+  "commanded": "commanded · moving",
+  "last commanded": "last commanded",
+};
+
+async function refreshLeg() {
+  clearTimeout(legTimer);
+  const leg = Number($("leg-pick").value);
+  let next = LEG_POLL_MS;
+  if (!document.hidden) {
+    try {
+      const r = (await api(`/api/leg/${leg}`)).result;
+      $("legview").dataset.source = r.source;
+      if (r.source === "none") {
+        $("leg-src").textContent = r.reason || "no reading";
+        next = LEG_IDLE_MS;
+      } else {
+        legTarget = r;
+        $("leg-femur-val").textContent = fmt(r.femur_up_deg);
+        $("leg-tibia-val").textContent = fmt(r.tibia_flex_deg);
+        $("leg-coxa-val").textContent = fmt(r.coxa_forward_deg);
+        $("leg-src").textContent = LEG_SOURCE[r.source] || r.source;
+        if (!legRaf) legRaf = requestAnimationFrame(legFrame);
+      }
+    } catch (e) {
+      $("legview").dataset.source = "none";
+      $("leg-src").textContent = `offline: ${e.message}`;
+      next = LEG_IDLE_MS;
+    }
+  } else {
+    next = LEG_IDLE_MS;
+  }
+  legTimer = setTimeout(refreshLeg, next);
+}
+
+try { const v = localStorage.getItem(LEG_KEY); if (v) $("leg-pick").value = v; }
+catch { /* blocked */ }
+$("leg-pick").addEventListener("change", () => {
+  try { localStorage.setItem(LEG_KEY, $("leg-pick").value); } catch { /* blocked */ }
+  legTarget = null; legShown = null;
+  refreshLeg();
+});
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) refreshLeg();
+});
+drawSide(0, 90);
+drawLegs(Number($("leg-pick").value), 0);
+refreshLeg();
+
 /* ---------------- motion enable ----------------
  * There is no ARM button: the server runs always-armed (safety.py,
  * ALWAYS_ARMED in app.py). The motion buttons still follow what the

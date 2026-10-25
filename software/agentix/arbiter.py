@@ -135,6 +135,34 @@ class Arbiter:
         self._last_action = what
         return True
 
+    def try_positions(self, sids):
+        """{sid: counts} if the bus is free RIGHT NOW, else None.
+
+        Never waits. For the leg animation, which polls several times a
+        second: blocking would queue it behind a 30-second motion, and
+        taking the lock even briefly mid-motion would put reads between a
+        gait's writes. When a motion holds the bus the caller falls back
+        to the goals it has been writing (gait_lib.LAST_GOALS).
+        """
+        if not self.available or not self._lock.acquire(blocking=False):
+            return None
+        try:
+            if not self._joints:
+                return None             # not discovered yet; not worth it here
+            out = {}
+            for sid in sids:
+                loc = self.locate(sid)
+                if loc is None:
+                    continue
+                try:
+                    out[sid] = read2(self._packet, loc[1], sid,
+                                     ADDR_PRESENT_POSITION, "leg view")
+                except BusError:
+                    pass
+            return out
+        finally:
+            self._lock.release()
+
     def session(self, what="read"):
         """Context manager giving exclusive bus access.
 

@@ -308,6 +308,49 @@ pre {
 .tilt.moving .body { opacity: .6; }
 
 .tilt-meta { font-size: 13px; line-height: 1.45; min-width: 0; }
+
+/* ---------------- leg animation ---------------- */
+.tilt { flex-wrap: wrap; }
+.legview {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-left: auto;
+  padding-left: 16px;
+  border-left: 1px solid var(--line);
+}
+.leg-side svg { width: 120px; height: 106px; }
+.leg-top svg  { width: 86px;  height: 86px; }
+.legview .seg {
+  stroke: var(--accent);
+  stroke-width: 9;
+  stroke-linecap: round;
+}
+.leg-top .seg { stroke-width: 14; }
+.legview .joint { fill: var(--panel); stroke: var(--accent); stroke-width: 3; }
+.legview .foot  { fill: var(--accent); }
+.legview .stub, .legview .hex { fill: var(--panel-2); stroke: var(--line); stroke-width: 3; }
+.legview .other { stroke: var(--line); stroke-width: 12; stroke-linecap: round; }
+.leg-top text { font-size: 22px; }
+.leg-pick { padding: 5px 8px; font-size: 12.5px; margin-bottom: 4px; max-width: 100%; }
+.legview .gauge figcaption { white-space: nowrap; }
+.legview .gauge figcaption b { min-width: 0; margin-right: 5px; }
+.leg-pick option { background: var(--panel); color: var(--text); }
+/* Commanded is where the leg was told to go, not a measurement: a
+   lighter leg says so without making the moving state the ugly one.
+   Nothing to show: grey it. */
+.legview[data-source="commanded"] .seg,
+.legview[data-source="last commanded"] .seg { stroke-opacity: .6; }
+.legview[data-source="none"] .seg,
+.legview[data-source="none"] .joint,
+.legview[data-source="none"] .foot { opacity: .35; }
+
+@media (max-width: 620px) {
+  .legview { margin-left: 0; padding-left: 0; border-left: 0; width: 100%;
+             flex-wrap: wrap; gap: 8px; }
+  .leg-side svg { width: 100px; height: 88px; }
+  .leg-top svg  { width: 72px;  height: 72px; }
+}
 .tilt-state { color: var(--text); font-weight: 600; }
 .tilt-detail { overflow-wrap: anywhere; }
 

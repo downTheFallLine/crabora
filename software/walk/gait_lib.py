@@ -365,6 +365,21 @@ def write1(packet, port, sid, addr, val, what):
 def write2(packet, port, sid, addr, val, what):
     _remember(packet)
     _txrx(lambda: packet.write2ByteTxRx(port, sid, addr, val), sid, what)
+    if addr == ADDR_GOAL_POSITION:
+        note_goal(sid, val)
+
+
+# The last goal position written to each servo: {sid: (counts, when)}.
+# PASSIVE -- nothing here or in any gait reads it to decide anything. It
+# exists so agentix's leg animation has something to show while a motion
+# holds the bus and the servos cannot be read. A goal is where the joint
+# was told to go, not where it is; close during a smooth gait, wrong for
+# a joint that is stalled or has been dropped limp.
+LAST_GOALS = {}
+
+
+def note_goal(sid, counts):
+    LAST_GOALS[sid] = (counts, time.monotonic())
 
 
 # =============================================================

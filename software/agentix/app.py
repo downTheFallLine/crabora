@@ -11,6 +11,7 @@ Endpoints:
     GET  /api/health        is the server up, is the bus open
     GET  /api/status        robot health summary (cheap, for polling)
     GET  /api/imu           pitch and roll, for the tilt widget (polled)
+    GET  /api/leg/<n>       one leg's joint angles, for the leg animation
     GET  /api/tools         what the agent can call, and what each does
     POST /api/tools/<name>  call one tool directly, bypassing the model
     POST /api/chat          natural language in, answer out
@@ -52,7 +53,7 @@ except ImportError:
 from arbiter import Arbiter, ArbiterError, Busy, Cancelled  # noqa: E402
 from motion import MOTION_HELP, MOTION_TOOLS, Unsafe   # noqa: E402
 from safety import NotArmed, Safety                    # noqa: E402
-from tools import READ_ONLY_TOOLS, TOOL_HELP         # noqa: E402
+from tools import READ_ONLY_TOOLS, TOOL_HELP, leg_pose  # noqa: E402
 
 WEB_DIR = os.path.join(_HERE, "web")
 
@@ -77,11 +78,13 @@ AGENT_REASON = "not started"
 
 
 class _QuietPolls(logging.Filter):
-    """Drop the access-log line for /api/imu. The tilt widget polls it
-    every second; logged, that is 86,400 journal lines a day burying the
-    ones worth reading."""
+    """Drop the access-log lines for /api/imu and /api/leg/<n>. The tilt
+    and leg widgets poll them every second or faster; logged, that is
+    hundreds of thousands of journal lines a day burying the ones worth
+    reading."""
     def filter(self, record):
-        return "/api/imu " not in record.getMessage()
+        msg = record.getMessage()
+        return "/api/imu " not in msg and "/api/leg/" not in msg
 
 
 logging.getLogger("werkzeug").addFilter(_QuietPolls())
@@ -136,6 +139,14 @@ def imu():
     # Not under ARB: the IMU is on I2C, not the servo bus, so tilt still
     # reads with the bus down or a motion holding it.
     return jsonify({"ok": True, "result": READ_ONLY_TOOLS["imu_state"]()})
+
+
+@app.get("/api/leg/<int:leg>")
+def leg(leg):
+    # Never waits on the bus -- see Arbiter.try_positions.
+    if leg not in range(1, 7):
+        return _fail("leg must be 1-6", 404)
+    return jsonify({"ok": True, "result": leg_pose(ARB, leg)})
 
 
 @app.get("/api/tools")

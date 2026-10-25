@@ -290,6 +290,56 @@ def imu_state(arbiter=None):
         return {"fitted": False, "error": f"{type(e).__name__}: {e}"}
 
 
+# Commanded goals older than this are not "where the leg is going" any
+# more -- the motion that wrote them is over.
+GOAL_FRESH_S = 2.0
+
+
+def leg_pose(arbiter, leg):
+    """One leg's three joint angles, for the UI's leg animation. NOT a
+    model tool: it is polled several times a second and never waits.
+
+    Measured from the servos when the bus is free. While a motion holds
+    the bus, the goals the gait last wrote instead (gait_lib.LAST_GOALS)
+    -- 'commanded', which is where the leg was told to go. Angles use the
+    kinematics' conventions: coxa_deg as foot_in_body_frame takes it
+    (+ is counter-clockwise from above), femur_up_deg (+ up from level),
+    tibia_flex_deg (0 straight, + folded).
+    """
+    import time                                       # noqa: PLC0415
+    from gait_lib import LAST_GOALS, FORWARD_SIGN    # noqa: PLC0415
+
+    sids = {d: leg * 10 + d for d in JOINT_DIGITS}
+    counts = arbiter.try_positions(list(sids.values()))
+    source, age = "measured", 0.0
+    if not counts or len(counts) < 3:
+        now = time.monotonic()
+        goals = {sid: LAST_GOALS.get(sid) for sid in sids.values()}
+        if all(goals.values()):
+            age = now - min(t for _c, t in goals.values())
+            counts = {sid: c for sid, (c, _t) in goals.items()}
+            source = "commanded" if age < GOAL_FRESH_S else "last commanded"
+        else:
+            return {"leg": leg, "name": LEG_NAME[leg], "source": "none",
+                    "reason": ("bus busy and nothing commanded yet"
+                               if arbiter.available else
+                               f"bus unavailable: {arbiter.reason}")}
+
+    coxa = to_degrees(counts[sids[COXA_JOINT_DIGIT]])
+    femur = -to_degrees(counts[sids[FEMUR_JOINT_DIGIT]])   # up is -count
+    tibia = -to_degrees(counts[sids[TIBIA_JOINT_DIGIT]])   # flex is -count
+    return {
+        "leg": leg, "name": LEG_NAME[leg], "source": source,
+        "age_s": round(age, 2),
+        "coxa_deg": round(coxa, 1),
+        # Forward-positive, for a label a person can read: the coxa is
+        # mirrored, so raw + means forward on one side and back on the other.
+        "coxa_forward_deg": round(coxa * FORWARD_SIGN[leg], 1) + 0.0,
+        "femur_up_deg": round(femur, 1),
+        "tibia_flex_deg": round(tibia, 1),
+    }
+
+
 # What the agent may call. Motion tools get added here, deliberately,
 # one blast radius at a time.
 READ_ONLY_TOOLS = {

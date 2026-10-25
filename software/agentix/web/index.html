@@ -93,6 +93,44 @@
       <div class="tilt-state" id="tilt-state">IMU</div>
       <div class="tilt-detail" id="tilt-detail">waiting…</div>
     </div>
+
+    <!-- One leg, animated: side view in the leg's own vertical plane
+         (femur and tibia), top view for the coxa swing. Drawn from the
+         same kinematics the gaits use (pose.leg_fk), in millimetres. -->
+    <div class="legview" id="legview" data-source="none">
+      <figure class="gauge leg-side">
+        <svg viewBox="-45 -125 280 250" aria-hidden="true">
+          <line class="level" x1="-45" y1="0" x2="235" y2="0"/>
+          <rect class="stub" x="-45" y="-9" width="45" height="18" rx="4"/>
+          <line class="seg" id="leg-femur" x1="0" y1="0" x2="100" y2="0"/>
+          <line class="seg" id="leg-tibia" x1="100" y1="0" x2="100" y2="120"/>
+          <circle class="joint" r="7" cx="0" cy="0"/>
+          <circle class="joint" id="leg-knee" r="6" cx="100" cy="0"/>
+          <circle class="foot" id="leg-foot" r="5" cx="100" cy="120"/>
+        </svg>
+        <figcaption>femur <b id="leg-femur-val">—</b> tibia <b id="leg-tibia-val">—</b></figcaption>
+      </figure>
+      <figure class="gauge leg-top">
+        <svg viewBox="-150 -150 300 300" aria-hidden="true">
+          <polygon class="hex" id="leg-hex"/>
+          <g id="leg-others"></g>
+          <line class="seg" id="leg-coxa" x1="0" y1="0" x2="0" y2="0"/>
+          <text x="0" y="-128" text-anchor="middle">front</text>
+        </svg>
+        <figcaption>coxa <b id="leg-coxa-val">—</b></figcaption>
+      </figure>
+      <div class="tilt-meta">
+        <select class="btn leg-pick" id="leg-pick" aria-label="Leg to show">
+          <option value="1">Leg 1 · front-right</option>
+          <option value="2">Leg 2 · right</option>
+          <option value="3">Leg 3 · rear-right</option>
+          <option value="4">Leg 4 · rear-left</option>
+          <option value="5">Leg 5 · left</option>
+          <option value="6">Leg 6 · front-left</option>
+        </select>
+        <div class="tilt-detail" id="leg-src">waiting…</div>
+      </div>
+    </div>
   </section>
 
   <div class="log" id="log" aria-live="polite">
