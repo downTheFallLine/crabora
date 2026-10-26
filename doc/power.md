@@ -147,13 +147,19 @@ URTs, running stand, walk and scurry.
 
 ## LOGIPOWER: Pi and sensors
 
-**Today:** a separate BEC set to 5 V -> Raspberry Pi 3. The IMU (MPU-6050)
-runs from the Pi's 3.3 V pin, **not 5 V** (see `doc/imu.md`). The URTs'
-USB data connections come from the Pi.
+**Today:** a separate BEC set to 5 V -> Raspberry Pi 3. The BEC is an
+**LM2596 module, rated up to 40 V input** (confirmed by Tom 2026-10-26),
+so it takes the 3S pack (12.6 V full) directly -- no change needed for the
+3S upgrade, and with 3S it actually regulates (7+ V of headroom). The IMU
+(MPU-6050) runs from the Pi's 3.3 V pin, **not 5 V** (see `doc/imu.md`).
+The URTs' USB data connections come from the Pi.
 
-Budget: a Pi 3 wants 5.1 V at up to 2.5 A. The BEC's rating is
-unconfirmed. A camera will add to the load, so check the BEC before
-adding one.
+Budget: a Pi 3 wants 5.1 V at up to 2.5 A. An LM2596 is good for about
+2 A continuous (3 A absolute), so the Pi alone is near its comfortable
+limit under load, and a camera would push past it. Before adding a
+camera, swap the BEC for a 5 V / 3 A+ converter (a 5 V UBEC rated 3-5 A,
+or an XL4015-class module). Set it to **5.1 V**, not 5.0: the Pi flags
+under-voltage below about 4.65 V, and the cable drops some.
 
 Gotchas:
 
@@ -172,6 +178,6 @@ Gotchas:
 - agentix: once the new buck regulates, update the agent's system prompt
   (`software/agentix/agent.py`), which still says the servo converter "is
   not regulating".
-- LOGIPOWER: confirm the 5 V BEC's model and current rating before the
-  camera goes on.
+- LOGIPOWER: the 5 V BEC is an LM2596 (40 V in, ~2 A continuous). Fine
+  for the 3S upgrade; replace with a 3 A+ converter before a camera.
 - Add the INA226 pack-voltage check to the motion preflight.
