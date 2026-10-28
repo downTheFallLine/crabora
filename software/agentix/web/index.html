@@ -131,6 +131,22 @@
         <div class="tilt-detail" id="leg-src">waiting…</div>
       </div>
     </div>
+
+    <!-- Servo current: every joint's draw, and their sum against the
+         servo buck's ceiling. Live during walk and scurry too: the
+         gaits' own polling leaves readings behind (gait_lib.LAST_CURRENT). -->
+    <div class="power" id="power" data-source="none" data-level="none">
+      <table class="amps" aria-label="Current per servo, amps">
+        <thead><tr><th></th><th>coxa</th><th>femur</th><th>tibia</th></tr></thead>
+        <tbody id="amps-body"></tbody>
+      </table>
+      <div class="tilt-meta">
+        <div class="tilt-state">servos <b id="power-total">—</b></div>
+        <div class="power-bar" aria-hidden="true"><span id="power-fill"></span></div>
+        <div class="tilt-detail" id="power-peak">peak —</div>
+        <div class="tilt-detail" id="power-src">waiting…</div>
+      </div>
+    </div>
   </section>
 
   <div class="log" id="log" aria-live="polite">

@@ -56,10 +56,10 @@ from gait_lib import (  # noqa: E402
     ALL_LEGS, CENTER_POSITION, COXA_JOINT_DIGIT, FEMUR_JOINT_DIGIT,
     JOINT_NAME, LEG_NAME, POSITION_TOLERANCE, TIBIA_JOINT_DIGIT,
     ADDR_GOAL_POSITION, ADDR_GOAL_SPEED, ADDR_MAX_ANGLE, ADDR_MIN_ANGLE,
-    ADDR_MOVING, ADDR_PRESENT_POSITION, ADDR_TORQUE_ENABLE,
+    ADDR_PRESENT_POSITION, ADDR_TORQUE_ENABLE,
     BusError, PacketHandler,
     confirm, find_joints, find_urt_devices, open_ports, read1, read2,
-    release, to_counts, to_degrees, write1, write2,
+    read_status, release, to_counts, to_degrees, write1, write2,
 )
 from pose import (  # noqa: E402
     GROUND_BELOW_FEMUR, Unreachable, floor_strikes, foot_height, pose_compact,
@@ -156,8 +156,11 @@ def move_group(packet, group, targets, tolerance=POSITION_TOLERANCE):
     while pending:
         for key in list(pending):
             sid, port = group[key]
-            pos = read2(packet, port, sid, ADDR_PRESENT_POSITION, "position")
-            moving = read1(packet, port, sid, ADDR_MOVING, "moving")
+            # One round trip for position, moving and current (two used
+            # to cost two trips and no current). The current lands in
+            # gait_lib.LAST_CURRENT for agentix's power view.
+            st = read_status(packet, port, sid)
+            pos, moving = st["pos"], st["moving"]
             results[key] = (pos, False)
             if not moving and abs(pos - targets[key]) <= tolerance:
                 pending.discard(key)

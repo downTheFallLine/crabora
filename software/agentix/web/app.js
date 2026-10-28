@@ -437,6 +437,97 @@ drawSide(0, 90);
 drawLegs(Number($("leg-pick").value), 0);
 refreshLeg();
 
+/* ---------------- servo current ----------------
+ * Polls /api/current twice a second. Measured from every servo when the
+ * bus is free; during a motion, whatever that motion's own polling read
+ * most recently (scurry reads one servo every 0.05 s, so each reading is
+ * up to about a second old there). The total is a sum of readings taken
+ * one at a time -- an estimate of the draw, not a simultaneous one.
+ *
+ * BUCK_A is the servo converter's comfortable continuous rating: the
+ * SELOKY LM2596 today (doc/power.md). Raise it when the bigger buck goes
+ * in. SERVO_A is where an STS3215 starts its over-current trip (>2 A for
+ * 2 s).
+ */
+const POWER_POLL_MS = 500, POWER_IDLE_MS = 3000;
+const BUCK_A = 2.0, SERVO_A = 2.0;
+const JOINTS = ["coxa", "femur", "tibia"];
+let powerTimer = null, powerPeak = 0, powerWasMoving = false;
+
+(function buildAmps() {
+  const body = $("amps-body");
+  for (let n = 1; n <= 6; n++) {
+    const tr = el("tr");
+    tr.appendChild(el("th", null, `L${n}`));
+    for (const j of JOINTS) {
+      const td = el("td", null, "—");
+      td.id = `amps-${n}-${j}`;
+      tr.appendChild(td);
+    }
+    body.appendChild(tr);
+  }
+})();
+
+function showPower(r) {
+  const p = $("power");
+  p.dataset.source = r.source;
+  if (r.source === "none") {
+    p.dataset.level = "none";
+    $("power-src").textContent = r.reason || "no reading";
+    return;
+  }
+  for (let n = 1; n <= 6; n++) {
+    for (const j of JOINTS) {
+      const td = $(`amps-${n}-${j}`), c = (r.legs[n] || {})[j];
+      td.className = "";
+      if (!c) { td.textContent = "—"; continue; }
+      td.textContent = c.amps.toFixed(2);
+      if (!c.fresh) td.classList.add("stale");
+      else if (c.amps >= SERVO_A) td.classList.add("bad");
+      else if (c.amps >= SERVO_A / 2) td.classList.add("warn");
+    }
+  }
+  // Peak covers one motion: it resets when a motion starts, and holds
+  // after it ends so the number is still there to read.
+  const moving = r.source === "during motion";
+  if (moving && !powerWasMoving) powerPeak = 0;
+  powerWasMoving = moving;
+  powerPeak = Math.max(powerPeak, r.total_amps);
+  const t = r.total_amps;
+  p.dataset.level = t >= BUCK_A ? "bad" : t >= BUCK_A * 0.75 ? "warn" : "good";
+  $("power-total").textContent = `${t.toFixed(2)} A`;
+  $("power-fill").style.width = `${Math.min(100, (t / BUCK_A) * 100)}%`;
+  $("power-peak").textContent =
+    `peak ${powerPeak.toFixed(2)} A · buck ~${BUCK_A} A`;
+  $("power-src").textContent =
+    `${moving ? "during motion" : "measured"} · ${r.servos} servos`;
+  p.title = r.note || "";
+}
+
+async function refreshPower() {
+  clearTimeout(powerTimer);
+  let next = POWER_POLL_MS;
+  if (!document.hidden) {
+    try {
+      const r = (await api("/api/current")).result;
+      showPower(r);
+      if (r.source === "none") next = POWER_IDLE_MS;
+    } catch (e) {
+      $("power").dataset.source = "none";
+      $("power").dataset.level = "none";
+      $("power-src").textContent = `offline: ${e.message}`;
+      next = POWER_IDLE_MS;
+    }
+  } else {
+    next = POWER_IDLE_MS;
+  }
+  powerTimer = setTimeout(refreshPower, next);
+}
+document.addEventListener("visibilitychange", () => {
+  if (!document.hidden) refreshPower();
+});
+refreshPower();
+
 /* ---------------- motion enable ----------------
  * There is no ARM button: the server runs always-armed (safety.py,
  * ALWAYS_ARMED in app.py). The motion buttons still follow what the

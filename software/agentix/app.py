@@ -12,6 +12,7 @@ Endpoints:
     GET  /api/status        robot health summary (cheap, for polling)
     GET  /api/imu           pitch and roll, for the tilt widget (polled)
     GET  /api/leg/<n>       one leg's joint angles, for the leg animation
+    GET  /api/current       every servo's current draw, for the power view
     GET  /api/tools         what the agent can call, and what each does
     POST /api/tools/<name>  call one tool directly, bypassing the model
     POST /api/chat          natural language in, answer out
@@ -53,7 +54,9 @@ except ImportError:
 from arbiter import Arbiter, ArbiterError, Busy, Cancelled  # noqa: E402
 from motion import MOTION_HELP, MOTION_TOOLS, Unsafe   # noqa: E402
 from safety import NotArmed, Safety                    # noqa: E402
-from tools import READ_ONLY_TOOLS, TOOL_HELP, leg_pose  # noqa: E402
+from tools import (  # noqa: E402
+    READ_ONLY_TOOLS, TOOL_HELP, leg_pose, servo_currents,
+)
 
 WEB_DIR = os.path.join(_HERE, "web")
 
@@ -78,13 +81,14 @@ AGENT_REASON = "not started"
 
 
 class _QuietPolls(logging.Filter):
-    """Drop the access-log lines for /api/imu and /api/leg/<n>. The tilt
-    and leg widgets poll them every second or faster; logged, that is
-    hundreds of thousands of journal lines a day burying the ones worth
-    reading."""
+    """Drop the access-log lines for /api/imu, /api/leg/<n> and
+    /api/current. The tilt, leg and power widgets poll them every second
+    or faster; logged, that is hundreds of thousands of journal lines a
+    day burying the ones worth reading."""
     def filter(self, record):
         msg = record.getMessage()
-        return "/api/imu " not in msg and "/api/leg/" not in msg
+        return not any(p in msg for p in
+                       ("/api/imu ", "/api/leg/", "/api/current "))
 
 
 logging.getLogger("werkzeug").addFilter(_QuietPolls())
@@ -147,6 +151,12 @@ def leg(leg):
     if leg not in range(1, 7):
         return _fail("leg must be 1-6", 404)
     return jsonify({"ok": True, "result": leg_pose(ARB, leg)})
+
+
+@app.get("/api/current")
+def current():
+    # Never waits on the bus -- see Arbiter.try_currents.
+    return jsonify({"ok": True, "result": servo_currents(ARB)})
 
 
 @app.get("/api/tools")

@@ -43,7 +43,8 @@ from gait_lib import (  # noqa: E402
     ADDR_GOAL_SPEED, ADDR_MAX_ANGLE, ADDR_MIN_ANGLE,
     ADDR_PRESENT_POSITION, POSITION_TOLERANCE,
     BusError, PacketHandler,
-    find_joints, find_urt_devices, open_ports, read1, read2, write1, write2,
+    find_joints, find_urt_devices, open_ports, read1, read2, read_status,
+    write1, write2,
 )
 
 JOINT_DIGITS = (COXA_JOINT_DIGIT, FEMUR_JOINT_DIGIT, TIBIA_JOINT_DIGIT)
@@ -160,6 +161,30 @@ class Arbiter:
                 except BusError:
                     pass
             return out
+        finally:
+            self._lock.release()
+
+    def try_currents(self):
+        """Read every known servo's current if the bus is free RIGHT NOW;
+        returns how many were read, or None if it was busy.
+
+        Same never-wait rule as try_positions, for the power view. The
+        readings land in gait_lib.LAST_CURRENT (read_status does that),
+        which is also where a running motion leaves its own, so the
+        caller reads one place either way.
+        """
+        if not self.available or not self._lock.acquire(blocking=False):
+            return None
+        try:
+            n = 0
+            for by_leg in (self._joints or {}).values():
+                for sid, port in by_leg.values():
+                    try:
+                        read_status(self._packet, port, sid, "power view")
+                        n += 1
+                    except BusError:
+                        pass
+            return n
         finally:
             self._lock.release()
 

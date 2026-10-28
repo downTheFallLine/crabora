@@ -257,6 +257,17 @@ ADDR_GOAL_SPEED       = 46
 ADDR_PRESENT_POSITION = 56
 ADDR_PRESENT_TEMP     = 63
 ADDR_MOVING           = 66
+ADDR_PRESENT_CURRENT  = 69   # 2 bytes, bit 15 = direction
+
+# Present-current units, from Feetech's STS3215 register table. Not yet
+# checked against an ammeter on this robot -- treat totals as approximate.
+AMPS_PER_COUNT = 0.0065
+
+# One read covers 56 (position) through 70 (current): position, speed,
+# load, voltage, temperature, status, moving and current in a single
+# round trip, where reading them separately costs one trip each.
+_STATUS_START = ADDR_PRESENT_POSITION
+_STATUS_LEN = ADDR_PRESENT_CURRENT + 2 - ADDR_PRESENT_POSITION
 
 
 class BusError(Exception):
@@ -369,6 +380,35 @@ def write2(packet, port, sid, addr, val, what):
         note_goal(sid, val)
 
 
+def decode_current(raw):
+    """Present-current register -> amps, magnitude only (bit 15 is the
+    direction of the torque, not a sign worth keeping for a power budget)."""
+    return (raw & 0x7FFF) * AMPS_PER_COUNT
+
+
+def read_status(packet, port, sid, what="status"):
+    """Position, moving flag and current in ONE round trip.
+
+    Returns {"pos", "moving", "amps"}. Also records the current in
+    LAST_CURRENT, so anything that polls servos for its own reasons
+    leaves a power reading behind for agentix to show.
+    """
+    _remember(packet)
+    data, _comm, _err = _txrx(
+        lambda: packet.readTxRx(port, sid, _STATUS_START, _STATUS_LEN),
+        sid, what)
+
+    def word(addr):
+        i = addr - _STATUS_START
+        return data[i] | (data[i + 1] << 8)
+
+    amps = decode_current(word(ADDR_PRESENT_CURRENT))
+    note_current(sid, amps)
+    return {"pos": word(ADDR_PRESENT_POSITION),
+            "moving": data[ADDR_MOVING - _STATUS_START],
+            "amps": amps}
+
+
 # The last goal position written to each servo: {sid: (counts, when)}.
 # PASSIVE -- nothing here or in any gait reads it to decide anything. It
 # exists so agentix's leg animation has something to show while a motion
@@ -380,6 +420,18 @@ LAST_GOALS = {}
 
 def note_goal(sid, counts):
     LAST_GOALS[sid] = (counts, time.monotonic())
+
+
+# The last current read from each servo: {sid: (amps, when)}. Passive,
+# like LAST_GOALS: filled by read_status() as a side effect of whatever
+# is polling, read by agentix's power view while a motion holds the bus.
+# Readings arrive one servo at a time, so a sum of them is an estimate
+# of the total draw, not a simultaneous measurement.
+LAST_CURRENT = {}
+
+
+def note_current(sid, amps):
+    LAST_CURRENT[sid] = (amps, time.monotonic())
 
 
 # =============================================================

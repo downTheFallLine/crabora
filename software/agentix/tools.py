@@ -340,6 +340,53 @@ def leg_pose(arbiter, leg):
     }
 
 
+# A current reading older than this is from a motion that has finished
+# or a servo the gait has not got round to; shown, but greyed.
+CURRENT_FRESH_S = 3.0
+
+
+def servo_currents(arbiter):
+    """Every servo's current draw, for the UI's power view. NOT a model
+    tool: polled about twice a second and never waits on the bus.
+
+    When the bus is free it reads all of them now. While a motion holds
+    it, the readings that motion's own polling left behind
+    (gait_lib.LAST_CURRENT) -- walk.py and stand.py read every servo
+    each poll; scurry reads one servo every 0.05 s, so each is up to
+    about a second old there.
+    """
+    import time                                       # noqa: PLC0415
+    from gait_lib import LAST_CURRENT                 # noqa: PLC0415
+
+    source = "during motion" if arbiter.try_currents() is None else "measured"
+    now = time.monotonic()
+    legs, total, fresh_n = {}, 0.0, 0
+    for leg in ALL_LEGS:
+        row = {}
+        for d in JOINT_DIGITS:
+            got = LAST_CURRENT.get(leg * 10 + d)
+            if got is None:
+                continue
+            amps, when = got
+            age = now - when
+            fresh = age < CURRENT_FRESH_S
+            row[JOINT_NAME[d]] = {"amps": round(amps, 2),
+                                  "age_s": round(age, 1), "fresh": fresh}
+            if fresh:
+                total += amps
+                fresh_n += 1
+        if row:
+            legs[leg] = row
+    if not legs:
+        return {"source": "none",
+                "reason": ("no readings yet" if arbiter.available else
+                           f"bus unavailable: {arbiter.reason}")}
+    return {"source": source, "legs": legs,
+            "total_amps": round(total, 2), "servos": fresh_n,
+            "note": ("servos read one at a time, so the total is an "
+                     "estimate, not a simultaneous measurement")}
+
+
 # What the agent may call. Motion tools get added here, deliberately,
 # one blast radius at a time.
 READ_ONLY_TOOLS = {
