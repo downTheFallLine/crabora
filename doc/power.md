@@ -39,9 +39,9 @@ bus misbehaves.
 
 ## PRIPOWER: batteries
 
-**Today:** a 2S pack (8.4 V full). Capacity and C rating unconfirmed.
-
-**Planned:** 3S, because LOCOPOWER's buck needs headroom (below).
+**Today (2026-10-27):** a 3S pack is in place (12.6 V full). Which pack
+it is, and whether the fuse, alarm, and charger below are fitted, is
+unconfirmed. The old 2S pack (8.4 V full) is retired.
 
 | Part | Choice | Notes |
 | --- | --- | --- |
@@ -53,8 +53,8 @@ bus misbehaves.
 
 Why 3S and not 2S: a buck converter needs roughly 1.5-2 V more in than
 out. A 2S pack is 8.4 V full and ~7.4 V near empty, so no buck can hold
-7.4 V from it. Today's LM2596 just passes the pack through minus a
-volt, and the servos lose torque as the pack drains. A 3S pack stays
+7.4 V from it. On 2S the LM2596 just passed the pack through minus a
+volt, and the servos lost torque as the pack drained. A 3S pack stays
 above ~9.9 V for its whole discharge.
 
 Rules:
@@ -71,12 +71,17 @@ is swapped for a heavy one.
 
 ## LOCOPOWER: servos
 
-**Today:** SELOKY LM2596 buck, set to 7.4 V. Good for ~2 A continuous
-(3 A absolute). Enough for coxa and femur bring-up and a short walk; not
-enough for reliable walking or scurry.
+**Today:** SELOKY LM2596 buck, set to 7.4 V, now fed from the 3S pack.
+With 2.5 V or more of headroom it **regulates** for the first time:
+the servos see a steady 7.4 V instead of a voltage that sags with the
+pack. The current ceiling is unchanged: ~2 A continuous (3 A absolute).
+Enough for coxa and femur bring-up and a short walk; not enough for
+reliable walking or scurry.
 
-**Ordered (2026-10-25):** XINGYHENG 20A 300W high-power buck converter
-module (Amazon B081X5YX8V), to replace the LM2596. Set to 7.4 V.
+**Returned (2026-10-27):** the XINGYHENG 20A 300W buck (Amazon
+B081X5YX8V, ordered 2026-10-25) arrived defective and is going back.
+No replacement chosen yet. The notes below still describe what the
+replacement should be.
 
 | Spec | Value | Source |
 | --- | --- | --- |
@@ -93,8 +98,8 @@ only with a fan. Walking (~10-12 A) should be comfortable; scurry peaks
 are at the edge, so give it airflow.
 
 **It needs the 3S pack to regulate.** With 6 V minimum input and the usual
-~1.5-2 V of headroom, 2S (8.4 V full) at 7.4 V out puts it in dropout
-like the LM2596. Install it with the 3S packs, not before.
+~1.5-2 V of headroom, 2S (8.4 V full) at 7.4 V out puts it in dropout,
+as it did the LM2596. The 3S pack is in place, so this is satisfied.
 
 Setting it up, **before any servo is connected**:
 
@@ -133,10 +138,14 @@ Gotchas:
 
 - **Brownout mimics wiring faults.** When the buck tops out, servos drop off
   the bus and IDs vanish intermittently. Suspect LOCOPOWER before the harness.
-- **Once the buck regulates, the servos can't see a low pack.** They read a
-  steady 7.4 V until the pack collapses, so `motion.py`'s <6.2 V preflight
-  stops catching a draining battery. The cell alarm covers this today; the
-  INA226 is the software fix.
+- **Now that the buck regulates, the servos can't see a low pack.** They
+  read a steady 7.4 V until the pack collapses, so `motion.py`'s <6.2 V
+  preflight no longer catches a draining battery. It still catches the
+  buck browning out under load. The cell alarm is the only low-pack
+  warning until the INA226 goes in, so fit it.
+- **Brownout now looks different.** On 2S, low servo voltage usually
+  meant a tired pack. On 3S, servo voltage below 7.4 V means the LM2596
+  is hitting its current ceiling.
 - **The URTs are the next bottleneck.** Each FE-URT-2 carries two legs,
   ~5-6 A while walking, through connectors rated ~3 A per pin. If URTs run
   warm or errors appear after the buck upgrade, inject power into each leg
@@ -170,14 +179,11 @@ Gotchas:
 
 ## Open items
 
-- PRIPOWER: buy the 3S packs, charger, fuse, and alarm. The new buck
-  needs the 3S packs to regulate.
-- LOCOPOWER: install the XINGYHENG 20 A buck when it arrives (ordered
-  2026-10-25); confirm its continuous rating and cooling; measure real
-  currents with a watt meter.
-- agentix: once the new buck regulates, update the agent's system prompt
-  (`software/agentix/agent.py`), which still says the servo converter "is
-  not regulating".
+- PRIPOWER: confirm which 3S pack is in, and that the fuse, cell alarm,
+  and 3S balance charger are in place.
+- LOCOPOWER: return the defective XINGYHENG 20 A buck; pick and order a
+  replacement (15-20 A class, CV/CC); measure real currents with a watt
+  meter.
 - LOGIPOWER: the 5 V BEC is an LM2596 (40 V in, ~2 A continuous). Fine
   for the 3S upgrade; replace with a 3 A+ converter before a camera.
 - Add the INA226 pack-voltage check to the motion preflight.

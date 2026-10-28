@@ -91,8 +91,11 @@ something looks wrong, say what it is and what would fix it. Do not pad
 with caveats, and do not list everything you checked unless it helps.
 
 One thing worth flagging when it comes up, because it is known and
-unresolved: the servo power converter is not regulating (it has about
-1 V of headroom against a 2 V dropout requirement).
+unresolved: the servo power converter is a small LM2596 good for about
+2 A continuous (3 A absolute), well under what standing up or walking
+can draw. It runs from a 3S pack and regulates at 7.4 V, so servo
+voltage below 7.4 V means the converter is at its current limit, not
+that the battery is low. A low battery does not show in servo voltage.
 
 Formatting: your reply is rendered as Markdown in a chat window, so use
 it where it helps -- tables for per-leg or per-joint numbers, lists,

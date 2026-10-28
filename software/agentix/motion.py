@@ -56,9 +56,10 @@ NAME_TO_DIGIT = {v: k for k, v in JOINT_NAME.items()}
 # here, continuing just cooks them.
 TEMP_REFUSE_C = 65
 
-# The LM2596 is not regulating and has ~1 V of headroom against a 2 V
-# dropout spec. Below this the servos are browning out, and a brownout
-# reads exactly like a wiring fault -- which is how an evening gets lost.
+# The LM2596 regulates 7.4 V from the 3S pack but tops out around 2 A.
+# Below this the servos are browning out, and a brownout reads exactly
+# like a wiring fault -- which is how an evening gets lost. It no longer
+# sees a draining pack: the buck holds 7.4 V until the pack collapses.
 VOLTAGE_FLOOR = 6.2
 
 NUDGE_MAX_DEG = 20.0      # a wrong sign should be a twitch, not a strike

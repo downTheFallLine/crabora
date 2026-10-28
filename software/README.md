@@ -145,11 +145,11 @@ machine with no servo SDK installed.
 
 ## Known open items
 
-- **Power is unmeasured.** The LM2596 passes 2–3 A on paper and is not
-  regulating (1 V differential against a 2 V dropout spec), but the
-  robot stands and turns on it anyway. An inline watt-meter would
-  settle whether it is a ceiling or a non-issue before walking leans on
-  it.
+- **Power is unmeasured.** The LM2596 passes 2–3 A on paper. It now
+  regulates 7.4 V from a 3S pack, and the robot stands and turns on it.
+  The 20 A replacement buck arrived defective and is being returned. An
+  inline watt-meter would settle whether the LM2596 is a ceiling or a
+  non-issue before walking leans on it.
 - **Walking speed.** `walk.py` walks; `scurry.py` should walk faster but
   has not yet run on hardware, and quick tripod reversals are where the
   unmeasured power path is most likely to show.
