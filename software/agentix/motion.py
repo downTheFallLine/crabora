@@ -539,7 +539,7 @@ def scurry(arbiter, safety, distance: float = 300.0,
     """Walk quickly, via scurry.py's clock-streamed version of walk's gait.
 
     Reused, not reimplemented: scurry.plan() flies the whole run on paper
-    first and refuses a cycle the femurs cannot follow, and there is no
+    first and refuses a cycle the servos cannot follow, and there is no
     --allow-fast from here. Open loop, so its own voltage guard is what
     stops it if the supply sags; a stop request ends it the same way,
     feet planted and torque on.
@@ -570,7 +570,8 @@ def scurry(arbiter, safety, distance: float = 300.0,
     args = argparse.Namespace(
         distance=distance, heading=heading, period=period,
         stride=prog.DEFAULT_STRIDE, duty=prog.DEFAULT_DUTY,
-        lift=prog.DEFAULT_LIFT, height=prog.DEFAULT_HEIGHT, foot_out=120.0,
+        lift=prog.DEFAULT_LIFT, height=prog.DEFAULT_HEIGHT,
+        foot_out=prog.DEFAULT_FOOT_OUT,
         coxa_limit=prog.DEFAULT_COXA_LIMIT, rate=prog.DEFAULT_RATE,
         min_volts=prog.DEFAULT_MIN_VOLTS)
     legs = sorted(ALL_LEGS)
@@ -580,8 +581,9 @@ def scurry(arbiter, safety, distance: float = 300.0,
         raise Unsafe(f"cannot scurry {distance:g} mm {direction}: {e}")
     if p["top_v"] > prog.MAX_FOLLOW_SPEED:
         raise Unsafe(f"a {period:g} s cycle needs {p['top_v']:.0f} steps/s "
-                     f"from the femurs, over the {prog.MAX_FOLLOW_SPEED} "
-                     f"they can be trusted to follow -- use a longer period")
+                     f"from the fastest joint, over the "
+                     f"{prog.MAX_FOLLOW_SPEED} the servos can be trusted to "
+                     f"follow -- use a longer period")
 
     with arbiter.session(f"scurry {distance:g}mm {direction}") as s:
         legs = _usable_legs(s, legs)
@@ -614,6 +616,8 @@ def scurry(arbiter, safety, distance: float = 300.0,
         "stopped": stopped if stopped != "cancelled" else None,
         "late_frames": outcome["late"] or None,
         "clamped_goals": st.clamped or None,
+        "tracking_lag_ms": {j: r["lag_ms"] for j, r in outcome["lag"].items()}
+                           or None,
         "note": ("commanded distance, open loop -- measure the floor. "
                  "Stopped early means feet planted and torque still on"
                  if stopped else
@@ -668,8 +672,8 @@ MOTION_HELP = {
         "Walk QUICKLY in a straight line: the same planted-foot gait as "
         "walk, streamed continuously instead of stopping between frames. "
         "distance in mm (20-1000, default 300), direction as for walk, "
-        "period 2-6 s per gait cycle (default 3, about 28 mm/s; shorter "
-        "is faster, and a period the femurs cannot follow is refused). "
+        "period 2-6 s per gait cycle (default 3, about 67 mm/s; shorter "
+        "is faster, and a period the servos cannot follow is refused). "
         "The robot must already be standing. Open loop: it stops itself "
         "if the supply sags, planting its feet and holding."),
     "turn": (

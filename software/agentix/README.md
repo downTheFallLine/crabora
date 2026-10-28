@@ -192,7 +192,7 @@ rather than copied, so the CLI and the agent run the same code.
 | `stand_up` | full recovery: collapse, untangle, stand |
 | `turn` | planted-foot, clockwise only |
 | `walk` | planted-foot, stop-and-wait, any of four directions |
-| `scurry` | walk's gait streamed at 50 Hz, open loop; period 2–6 s, refused if the femurs cannot follow; stops itself on a supply sag |
+| `scurry` | walk's gait streamed at 50 Hz, open loop; period 2–6 s, refused if the servos cannot follow; stops itself on a supply sag; reports per-joint tracking lag |
 | `dance` | highest frame rate, most servos at once |
 
 `lay_down` is `pose_splay()`, which is every joint at centre — that is

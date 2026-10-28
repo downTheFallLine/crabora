@@ -37,7 +37,12 @@ moves. What is new is only WHEN each pose is asked for:
 WHAT IT CANNOT SEE.
 
 This is open loop. walk.py knew, every frame, whether each joint got
-there; this does not ask. Two guards stand in for that:
+there; this does not ask before moving on. What it does instead is
+sample: every 0.05 s it reads one servo's real position and current,
+round-robin, and the end-of-run report gives each joint's tracking error
+and lag. The currents feed agentix's live power view.
+That is a measurement, not a guard -- nothing stops on it. Two guards
+stand in for walk.py's checks:
 
   - a supply-voltage read every 0.2 s, round-robin over the femurs. The
     LM2596 caps around 3 A and the power draw is unmeasured; quick
@@ -50,10 +55,18 @@ there; this does not ask. Two guards stand in for that:
 Either way it stops by planting whichever feet are up and holding, torque
 ON -- same rule as walk.py's Ctrl-C.
 
-START SLOW. The default --period of 3.0 s is about 2x walk.py. Shorten it
-a step at a time (2.5, 2.0, 1.6, ...) and watch the voltage figure it
-prints at the end. --dry-run gives the joint speeds each setting needs
-and refuses one the servos cannot plausibly follow under load.
+GOING FASTER. Body speed comes from stride, and the femur's speed from
+lift, so the defaults pair a long stride (120 mm asked) with a modest
+lift (20°) and a slightly narrower stance (110 mm) -- about 67 mm/s at
+the default 3.0 s period. Then shorten --period a step at a time (2.5,
+2.0, 1.7, ...) and watch the voltage and tracking figures it prints at
+the end. --dry-run gives the joint speeds each setting needs and refuses
+one the servos cannot plausibly follow under load.
+
+Past about a 1.6 s period the stream needs more acceleration than the
+servo register can hold (25,400 steps/s^2). The plan then sets it
+unlimited rather than capping it silently, and suggests --rate 100 to
+keep each frame's step small.
 
 NOT YET RUN ON HARDWARE.
 
@@ -61,6 +74,7 @@ Usage:
   python3 scurry.py 500 --dry-run            # plan only, touch nothing
   python3 scurry.py 500                      # 0.5 m forward, 3 s cycles
   python3 scurry.py 500 --period 2.0         # quicker
+  python3 scurry.py 500 --period 1.7 --duty 0.5   # ~118 mm/s planned
   python3 scurry.py 300 --heading 90         # sideways, left
 
 Requires: pip install feetech-servo-sdk   (provides the scservo_sdk module)
@@ -81,14 +95,15 @@ from gait_lib import (  # noqa: E402
     ALL_LEGS, COXA_JOINT_DIGIT, FEMUR_JOINT_DIGIT, LEG_NAME,
     TIBIA_JOINT_DIGIT, TRIPOD_A, TRIPOD_B, tripod_gap, ground_clearance,
     ADDR_GOAL_POSITION, ADDR_GOAL_SPEED, ADDR_MAX_ANGLE, ADDR_MIN_ANGLE,
-    ADDR_TORQUE_ENABLE, BusError, PacketHandler, bus_stats, reset_bus_stats,
+    ADDR_TORQUE_ENABLE, BusError, PacketHandler,
+    bus_stats, read_status, reset_bus_stats,
     confirm, find_joints, find_urt_devices, note_goal, open_ports, read1, read2,
     write1, write2,
 )
 from pose import Unreachable, pose_stand  # noqa: E402
 from stand import LOADED_TOLERANCE, clamp, move_group, pose_counts  # noqa: E402
 from walk import (  # noqa: E402
-    DEFAULT_HEIGHT, DEFAULT_LIFT, DEFAULT_COXA_LIMIT, _normalise,
+    DEFAULT_HEIGHT, DEFAULT_COXA_LIMIT, _normalise,
     max_half_stride, measure_stance, planted_radius, stance_pose,
 )
 
@@ -99,8 +114,19 @@ except ImportError:
         pass
 
 DEFAULT_PERIOD = 3.0     # seconds per full cycle (both tripods swing once).
-                         # Conservative on purpose: about twice walk.py.
-DEFAULT_STRIDE = 50.0    # mm each stance foot covers, as walk.py
+                         # Conservative on purpose: shorten it, not the rest.
+# Stride is the cheap way to go faster and lift the expensive one. The
+# femur does all the lifting, inside the swing, so its speed scales with
+# lift and not stride; body speed scales with stride and not lift. So a
+# long stride with a modest lift, rather than walk.py's 50 mm and 35°.
+DEFAULT_STRIDE = 120.0   # mm each stance foot covers (asked; plan() may cap it)
+DEFAULT_LIFT = 20.0      # femur degrees of swing lift. ~30 mm of foot rise,
+                         # still clear of TRIPOD_SAG on a flat floor
+DEFAULT_FOOT_OUT = 110.0 # mm outboard of the femur axis while scurrying. 10 mm
+                         # in from the stand pose: it slows the femur and
+                         # tibia and gives the stride more reach
+STAND_FOOT_OUT = 120.0   # where stand.py leaves the feet, so where a run
+                         # starts from and goes back to
 DEFAULT_DUTY = 0.55      # fraction of the cycle each tripod is on the floor
 DEFAULT_RATE = 50.0      # frames per second sent to the servos
 DEFAULT_MIN_VOLTS = 6.5  # stop below this. The buck is set to 7.4 V; the
@@ -118,8 +144,16 @@ MAX_FOLLOW_SPEED = 1500  # steps/s
 STEPS_PER_DEG = 4096 / 360.0
 
 ADDR_ACCELERATION = 41  # 1 byte, units of 100 steps/s^2, 0 = unlimited
+ACCEL_MAX = 254          # the register's ceiling: 25,400 steps/s^2
 ADDR_PRESENT_VOLTAGE = 62  # 1 byte, 0.1 V
 VOLT_EVERY = 0.2         # seconds between voltage reads
+LAG_EVERY = 0.05         # seconds between tracking reads (position and
+                         # current), one servo at a time, so each of 18 is
+                         # read about once a second. Each is a round trip
+                         # on the bus; if frames start going out late,
+                         # this is the first thing to back off
+LAG_MIN_SPEED = 300      # steps/s. Below this a joint is barely moving
+                         # and error / speed says nothing about lag
 
 INST_SYNC_WRITE = 0x83
 BROADCAST_ID = 0xFE
@@ -160,6 +194,17 @@ def swing_s(w, half, duty):
     h01 = -2 * w**3 + 3 * w**2
     h11 = w**3 - w**2
     return h00 * p0 + h10 * m + h01 * p1 + h11 * m
+
+
+def swing_overshoot(duty):
+    """How far past the stance extremes the swing foot goes, as a
+    multiple of `half`: max |swing_s| / half.
+
+    swing_s is linear in `half`, so this depends on duty alone. The legs
+    have to reach `half` times this, not just `half` -- a stride sized
+    to the stance cap alone fails the moment the swing overshoots it.
+    """
+    return max(abs(swing_s(i / 400.0, 1.0, duty)) for i in range(401))
 
 
 def gait_frame(phase, legs, *, half, duty, lift, height, r_foot, heading,
@@ -223,16 +268,20 @@ def plan(args, legs):
     paper at the frame rate: every pose solvable, every coxa in limit,
     and the peak joint speed and acceleration each setting needs."""
     base = pose_stand(args.height, args.foot_out)
+    stand = pose_stand(args.height, STAND_FOOT_OUT)
     r_foot = planted_radius(base)
     cap = max_half_stride(args.height, r_foot, args.coxa_limit,
                           args.heading, legs)
     if cap <= 0:
         raise Unreachable(f"no usable stride at {args.height:g} mm on "
                           f"heading {args.heading:g}")
+    # The swing carries the foot past the stance extremes, so the stride
+    # the legs can really hold is the stance cap shrunk by that overshoot.
+    swing_cap = cap / swing_overshoot(args.duty)
 
     # The body moves 2*half while a foot is in stance, which is `duty` of
     # a cycle, so one cycle carries the body 2*half/duty.
-    half_max = min(args.stride / 2.0, cap)
+    half_max = min(args.stride / 2.0, swing_cap)
     per_cycle_max = 2.0 * half_max / args.duty
     n_cycles = max(1, math.ceil(args.distance / per_cycle_max))
     per_cycle = args.distance / n_cycles
@@ -282,15 +331,25 @@ def plan(args, legs):
     # the servo is never the thing holding a joint back.
     servo_speed = int(min(3400, max(600, top_v * 1.5)))
     # Acceleration: enough to follow the stream with headroom. A low value
-    # here makes the servo lag the trajectory; 0 would be unlimited, which
-    # lets every 20 ms goal step land as a hard kick.
-    accel = int(min(254, max(1, math.ceil(top_a * 1.5 / 100.0))))
+    # here makes the servo lag the trajectory; 0 is unlimited, which lets
+    # every goal step land as a kick.
+    #
+    # But the register stops at ACCEL_MAX, and a short period needs more
+    # than that. Pinning it there would cap the servo silently, and it
+    # would fall behind the trajectory with nothing in the plan to say so.
+    # So past the ceiling it goes unlimited instead, and the smoothness
+    # has to come from the stream: the kicks are one frame's worth of
+    # motion, which is why a faster --rate matters then.
+    accel_wanted = max(1, math.ceil(top_a * 1.5 / 100.0))
+    accel = 0 if accel_wanted > ACCEL_MAX else accel_wanted
 
-    return {"base": base, "r_foot": r_foot, "cap": cap, "half": half,
+    return {"base": base, "stand": stand, "r_foot": r_foot, "cap": cap,
+            "swing_cap": swing_cap, "half": half,
             "n_cycles": n_cycles, "per_cycle": per_cycle, "total": total,
             "speed_mm_s": per_cycle / args.period, "peak_v": peak_v,
             "peak_a": peak_a, "top_v": top_v, "servo_speed": servo_speed,
-            "accel": accel, "worst_coxa": worst_coxa, "common": common}
+            "accel": accel, "accel_wanted": accel_wanted,
+            "worst_coxa": worst_coxa, "common": common}
 
 
 # =============================================================
@@ -322,7 +381,12 @@ def sync_write_goals(ports_ids, targets):
 
 class Streamer:
     """Holds the bus wiring for one run: which servo is on which port,
-    each joint's firmware limits, and how many goals got clamped."""
+    each joint's firmware limits, and how many goals got clamped.
+
+    Also keeps the last goal and commanded speed of every servo, so a
+    position read mid-stream can be turned into a tracking error -- the
+    one thing an open-loop stream otherwise never learns.
+    """
 
     def __init__(self, packet, joints, legs, limits):
         self.packet = packet
@@ -330,11 +394,18 @@ class Streamer:
         self.legs = legs
         self.limits = limits
         self.by_port = {}
+        self.where = {}
         for leg in legs:
-            for dg, _ in JOINTS:
+            for dg, name in JOINTS:
                 sid, port = joints[dg][leg]
                 self.by_port.setdefault(port, []).append(sid)
+                self.where[sid] = (port, name)
+        self.sids = sorted(self.where)
         self.clamped = 0
+        self.goal = {}           # {sid: counts} last sent
+        self.speed = {}          # {sid: steps/s} between the last two frames
+        self.sent_at = None
+        self.lag = {name: [] for _, name in JOINTS}   # [(|err|, |speed|)]
 
     def counts(self, frame):
         out = {}
@@ -350,7 +421,52 @@ class Streamer:
         return out
 
     def stream(self, frame):
-        sync_write_goals(self.by_port, self.counts(frame))
+        targets = self.counts(frame)
+        sync_write_goals(self.by_port, targets)
+        now = time.monotonic()
+        if self.sent_at is not None and now > self.sent_at:
+            dt = now - self.sent_at
+            for sid, c in targets.items():
+                self.speed[sid] = (c - self.goal[sid]) / dt
+        self.goal = targets
+        self.sent_at = now
+
+    def sample_lag(self, i):
+        """Read where the i-th servo (round-robin) actually is, against
+        the goal it was just sent.
+
+        The goal went out this same frame, so even a servo that tracks
+        perfectly reads about one frame behind. Error / commanded speed
+        turns that into a time, which is comparable across joints and
+        settings; anything well past one frame is the servo falling
+        behind.
+        """
+        sid = self.sids[i % len(self.sids)]
+        if sid not in self.goal:
+            return
+        port, name = self.where[sid]
+        # read_status, not a bare position read: the same round trip
+        # brings back the servo's current for agentix's power view.
+        pos = read_status(self.packet, port, sid, "position")["pos"]
+        self.lag[name].append((abs(pos - self.goal[sid]),
+                               abs(self.speed.get(sid, 0.0))))
+
+    def lag_report(self):
+        """{joint: {"n", "max_deg", "mean_deg", "lag_ms"}} for joints read.
+        lag_ms is None when the joint was never caught moving."""
+        out = {}
+        for name, samples in self.lag.items():
+            if not samples:
+                continue
+            errs = [e for e, _ in samples]
+            moving = [e / v * 1000.0 for e, v in samples if v >= LAG_MIN_SPEED]
+            out[name] = {
+                "n": len(samples),
+                "max_deg": round(max(errs) / STEPS_PER_DEG, 1),
+                "mean_deg": round(sum(errs) / len(errs) / STEPS_PER_DEG, 1),
+                "lag_ms": round(sum(moving) / len(moving)) if moving else None,
+            }
+        return out
 
     def move(self, frame):
         """walk.py-style: send and wait. Used outside the stream only."""
@@ -421,12 +537,15 @@ def reposition(st, current, target, lift):
 def run_scurry(st, p, args, *, should_cancel=None, log=print):
     """Set up, stream the gait, wind down.
 
-    Returns {"travelled", "elapsed", "min_volts", "late", "stopped"}
-    where `stopped` is None for a clean finish or the reason it ended.
+    Returns {"travelled", "elapsed", "min_volts", "late", "stopped", "lag"}
+    where `stopped` is None for a clean finish or the reason it ended, and
+    `lag` is Streamer.lag_report().
     """
     common = p["common"]
     legs = st.legs
-    base = {l: p["base"] for l in legs}
+    # From the stand pose, not the gait's own width: the feet are wherever
+    # stand.py left them, and reposition() is what moves them in.
+    base = {l: p["stand"] for l in legs}
 
     log("\n  -> into the gait, one tripod at a time")
     st.save_accel()
@@ -446,6 +565,8 @@ def run_scurry(st, p, args, *, should_cancel=None, log=print):
     phase = 0.0
     volt_leg = 0
     next_volt = 0.0
+    lag_i = 0
+    next_lag = 0.0
     t0 = time.monotonic()
     next_tick = t0
     last_cycle = -1
@@ -475,6 +596,12 @@ def run_scurry(st, p, args, *, should_cancel=None, log=print):
                     stopped = (f"supply fell to {v:.1f} V (limit "
                                f"{args.min_volts:g})")
                     break
+            elif t >= next_lag:
+                # Never in the same frame as a voltage read: two round
+                # trips in one tick is how a frame goes out late.
+                next_lag = t + LAG_EVERY
+                st.sample_lag(lag_i)
+                lag_i += 1
 
             if should_cancel is not None and should_cancel():
                 stopped = "cancelled"
@@ -516,7 +643,8 @@ def run_scurry(st, p, args, *, should_cancel=None, log=print):
         reposition(st, end, base, args.lift)
 
     return {"travelled": travelled, "elapsed": elapsed,
-            "min_volts": min_volts, "late": late, "stopped": stopped}
+            "min_volts": min_volts, "late": late, "stopped": stopped,
+            "lag": st.lag_report()}
 
 
 # =============================================================
@@ -529,7 +657,8 @@ def print_plan(p, args):
     print(f"CRABORA scurry -- {args.distance:g} mm {name}")
     print(f"  {p['n_cycles']} cycle(s) of {args.period:g} s, "
           f"{p['per_cycle']:.0f} mm per cycle, stance stride "
-          f"{2 * p['half']:.0f} mm (legs can hold +/-{p['cap']:.0f})")
+          f"{2 * p['half']:.0f} mm (legs can hold +/-{p['swing_cap']:.0f} "
+          f"once the swing overshoot is allowed for)")
     print(f"  cruise speed {p['speed_mm_s']:.0f} mm/s; whole run "
           f"{p['total']:.1f} s including one period of ramp at each end")
     print(f"  duty {args.duty:g} (each tripod on the floor "
@@ -543,8 +672,16 @@ def print_plan(p, args):
         v = p["peak_v"][name]
         print(f"  {name:<6} {v:>8.0f} steps/s {v * 360 / 4096:>4.0f}°/s"
               f" {p['peak_a'][name]:>12.0f} steps/s²")
-    print(f"\n  servo speed limit {p['servo_speed']}, acceleration "
-          f"{p['accel']} (x100 steps/s²)")
+    if p["accel"]:
+        print(f"\n  servo speed limit {p['servo_speed']}, acceleration "
+              f"{p['accel']} (x100 steps/s²)")
+    else:
+        print(f"\n  servo speed limit {p['servo_speed']}, acceleration "
+              f"UNLIMITED: the stream needs {p['accel_wanted']}, over the "
+              f"register's {ACCEL_MAX}")
+        if args.rate < 100:
+            print(f"  ⚠ with no acceleration limit each frame lands as a "
+                  f"step; --rate 100 halves them")
     print(f"  stops if the supply reads below {args.min_volts:g} V")
 
 
@@ -567,7 +704,10 @@ def main():
                     help=f"femur degrees of swing lift (default "
                          f"{DEFAULT_LIFT:g})")
     ap.add_argument("--height", type=float, default=DEFAULT_HEIGHT)
-    ap.add_argument("--foot-out", type=float, default=120.0)
+    ap.add_argument("--foot-out", type=float, default=DEFAULT_FOOT_OUT,
+                    help=f"mm outboard of the femur axis while scurrying "
+                         f"(default {DEFAULT_FOOT_OUT:g}; stand.py uses "
+                         f"{STAND_FOOT_OUT:g})")
     ap.add_argument("--coxa-limit", type=float, default=DEFAULT_COXA_LIMIT)
     ap.add_argument("--rate", type=float, default=DEFAULT_RATE,
                     help=f"frames per second (default {DEFAULT_RATE:g})")
@@ -690,6 +830,18 @@ def main():
         if out["late"]:
             print(f"  {out['late']} frame(s) sent late -- the loop could "
                   f"not keep up with {args.rate:g} Hz")
+        if out["lag"]:
+            frame_ms = 1000.0 / args.rate
+            print(f"\n  tracking (one frame is {frame_ms:.0f} ms; a servo "
+                  f"that keeps up reads about that far behind):")
+            print(f"  {'joint':<6} {'reads':>5} {'max err':>8} "
+                  f"{'mean err':>9} {'lag':>8}")
+            for _, name in JOINTS:
+                r = out["lag"].get(name)
+                if r:
+                    lag = f"{r['lag_ms']} ms" if r["lag_ms"] is not None else "-"
+                    print(f"  {name:<6} {r['n']:>5} {r['max_deg']:>7.1f}° "
+                          f"{r['mean_deg']:>8.1f}° {lag:>8}")
         if st.clamped:
             print(f"  {st.clamped} goal(s) clamped to a firmware limit")
         if retries or failures:

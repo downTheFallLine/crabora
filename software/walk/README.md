@@ -379,22 +379,34 @@ packet per URT. No replies, no waiting. The geometry is walk.py's
 
 ```bash
 python3 scurry.py 500 --dry-run          # plan, joint speeds, touches nothing
-python3 scurry.py 500                    # 3 s cycles, ~28 mm/s
+python3 scurry.py 500                    # 3 s cycles, ~67 mm/s
 python3 scurry.py 500 --period 2.5       # then shorten a step at a time
 ```
 
 **It is open loop.** walk.py knew whether each joint arrived; this does
 not ask. In place of that it reads supply voltage every 0.2 s and stops
 below `--min-volts` (6.5), and ends the run on any bus error. Stopping
-means planting whichever feet are up and holding, torque on.
+means planting whichever feet are up and holding, torque on. It also
+reads one servo's real position and current every 0.05 s, round-robin,
+and reports each joint's tracking error and lag at the end -- a
+measurement, not a guard. The currents show live in agentix.
 
-**The femur sets the speed limit.** The 35° swing lift has to go up and
-down inside the swing, so it is the fastest joint by far: about 1000
-steps/s at a 3 s cycle, 1500 at 2 s. `--dry-run` refuses anything over
-1500 steps/s (half an unloaded STS3215, as a guess at what a loaded one
-will follow) unless `--allow-fast` is passed. A longer stride with less
-lift buys speed more cheaply than a shorter period: `--period 1.5
---stride 80 --lift 25` plans at ~83 mm/s with the femur at ~1640.
+**Speed: stride is cheap, lift is expensive.** The femur does all the
+lifting, inside the swing, so its speed scales with lift and not
+stride; body speed scales with stride and not lift. So scurry's
+defaults differ from walk.py's: a 120 mm stride (asked; capped to what
+the legs hold, swing overshoot included), 20° lift, and feet 110 mm out
+instead of 120 (it moves them in from the stand pose and back). At the
+default 3 s period that plans ~67 mm/s, against ~30 mm/s with walk.py's
+geometry.
+
+`--dry-run` refuses anything needing over 1500 steps/s from any joint
+(half an unloaded STS3215, as a guess at what a loaded one will follow)
+unless `--allow-fast` is passed. The tracking report is how to replace
+that guess. `--period 1.7 --duty 0.5` plans ~118 mm/s with the tibia at
+~1420. Past a ~1.6 s period the stream needs more acceleration than the
+servo register holds (25,400 steps/s²), so the plan sets it unlimited
+and suggests `--rate 100`.
 
 **Not yet run on hardware.** Tested against a fake bus: 50 Hz held with no
 late frames, the packets decode with valid checksums, and the low-voltage
