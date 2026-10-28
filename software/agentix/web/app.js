@@ -76,6 +76,9 @@ function headline(d) {
                               (d.cancelled ? " \u2014 stopped early" : "");
     case "dance":      return `Danced ${d.seconds}s, ${d.frames} frames` +
                               (d.cancelled ? " \u2014 stopped early" : "");
+    case "scare":      return `Reared up and waved ${d.waves} time${d.waves === 1 ? "" : "s"}` +
+                              (d.stopped ? ` \u2014 stopped: ${d.stopped}`
+                               : d.cancelled ? " \u2014 stopped early" : "");
     default:           return null;
   }
 }
@@ -93,6 +96,7 @@ const CONSUMED = {
   walk:     ["travelled_mm", "direction", "cancelled"],
   scurry:   ["travelled_mm", "direction", "speed_mm_s", "cancelled", "stopped"],
   dance:    ["seconds", "frames", "cancelled"],
+  scare:    ["waves", "cancelled", "stopped"],
 };
 
 /* Bus retries deserve to be noticed, not folded into a nested block. */

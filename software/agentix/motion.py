@@ -32,7 +32,7 @@ import time
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _SOFTWARE = os.path.dirname(_HERE)
-for _d in ("walk", "stand", "turn", "dance"):
+for _d in ("walk", "stand", "turn", "dance", "scare"):
     sys.path.insert(0, os.path.join(_SOFTWARE, _d))
 
 from gait_lib import (  # noqa: E402
@@ -474,6 +474,60 @@ def dance(arbiter, safety, seconds: float = 10.0):
 
 
 
+def scare(arbiter, safety, waves: int = 4):
+    """Rear up on legs 2-5 and wave legs 1 and 6, via scare.py.
+
+    Reused, not reimplemented: scare.plan() works out every frame and
+    the tipping margin first, and run_scare() plays them, checking the
+    supply each wave and putting the legs down and stepping back to
+    standing if it sags. A stop ends it where it is (STOP drops torque).
+    """
+    try:
+        waves = int(waves)
+    except (TypeError, ValueError):
+        raise Unsafe(f"waves must be a whole number, got {waves!r}")
+    if not 1 <= waves <= 12:
+        raise Unsafe(f"scare waves 1-12 times, got {waves}")
+
+    _gate(arbiter, safety)
+    import scare as prog                             # noqa: PLC0415
+    from pose import Unreachable                     # noqa: PLC0415
+
+    height = prog.DEFAULT_HEIGHT
+    try:
+        p = prog.plan(height, 120.0, prog.DEFAULT_BRACE, waves)
+    except Unreachable as e:
+        raise Unsafe(f"cannot scare: {e}")
+    if p["margin"] < prog.MIN_MARGIN:
+        raise Unsafe(f"only {p['margin']:.0f} mm of tipping margin on four "
+                     f"legs, under the {prog.MIN_MARGIN:g} it needs")
+
+    with arbiter.session(f"scare x{waves}") as s:
+        legs = _usable_legs(s, sorted(ALL_LEGS))
+        if len(legs) < 6:
+            raise Unsafe(f"scare! needs all six legs; {sorted(legs)} answered")
+        joints = s.joints()
+        measured = prog.measure_stance(s.packet, joints, legs)
+        if measured and min(measured.values()) < height - 25.0:
+            raise Unsafe(f"the body is at {min(measured.values()):.0f} mm and "
+                         f"scare! expects {height:g} -- stand up first")
+        v0 = prog.supply_volts(s.packet, joints)
+        if v0 < prog.DEFAULT_MIN_VOLTS + 0.3:
+            raise Unsafe(f"supply is {v0:.1f} V at rest -- charge the battery")
+        outcome = prog.run_scare(s.packet, joints, _limits(s, legs), p,
+                                 should_cancel=lambda: arbiter.stopping,
+                                 log=lambda *a, **k: None)
+
+    stopped = outcome["stopped"]
+    return _done(safety, {
+        "action": "scare", "waves": outcome["waves"], "asked_waves": waves,
+        "frames": outcome["frames"], "margin_mm": round(p["margin"]),
+        "volts_at_rest": round(v0, 1), "volts_lowest": outcome["min_volts"],
+        "cancelled": stopped == "cancelled",
+        "stopped": stopped if stopped != "cancelled" else None,
+    })
+
+
 HEADINGS = {"forward": 0.0, "backward": 180.0, "left": 90.0, "right": 270.0}
 WALK_MIN_MM, WALK_MAX_MM = 20.0, 1000.0
 
@@ -635,6 +689,7 @@ MOTION_TOOLS = {
     "scurry": scurry,
     "turn": turn,
     "dance": dance,
+    "scare": scare,
 }
 
 
@@ -683,4 +738,10 @@ MOTION_HELP = {
     "dance": (
         "Dance for 2-30 seconds, default 10, then return to standing. "
         "The robot must already be standing."),
+    "scare": (
+        "scare!: rear up on legs 2-5 and wave the front legs 1 and 6 "
+        "menacingly. waves 1-12, default 4. Legs 2 and 5 step forward "
+        "first so it does not tip onto its nose, and it steps back to "
+        "standing at the end. The robot must already be standing; it "
+        "stands on four legs, so it draws more current per leg."),
 }

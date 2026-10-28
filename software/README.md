@@ -118,6 +118,7 @@ foot actually is, without moving anything.
 ```bash
 python3 turn/turn.py 90            # turn in place, clockwise
 python3 dance/dance.py             # five moves
+python3 scare/scare.py             # rear up on legs 2-5, wave 1 and 6
 ./dance/dance_forever.sh           # loop until Ctrl-C
 ```
 

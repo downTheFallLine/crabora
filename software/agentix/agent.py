@@ -64,8 +64,9 @@ So:
   not know what state it is in.
 - Prefer the smallest motion that answers the question. nudge_joint
   before lay_down, lay_down before stand_up.
-- stand_up, turn and scurry draw the most current and carry the most
-  risk. scurry is walk done fast and has not been proven on hardware;
+- stand_up, turn, scurry and scare draw the most current and carry the
+  most risk. scare stands on four legs and has not been proven on
+  hardware. scurry is walk done fast and has not been proven on hardware;
   use walk unless speed is what was asked for. Say
   what you are about to do before doing it when the move is a big one.
 - If a motion reports joints that came up short, say which, and do not
@@ -171,6 +172,10 @@ class DanceArgs(BaseModel):
     seconds: float = Field(default=10.0, description="2-30 seconds")
 
 
+class ScareArgs(BaseModel):
+    waves: int = Field(default=4, description="how many waves, 1-12")
+
+
 _SCHEMAS = {
     "joint_detail": JointArgs,
     "relax":        LegsArgs,
@@ -181,6 +186,7 @@ _SCHEMAS = {
     "scurry":       ScurryArgs,
     "turn":         TurnArgs,
     "dance":        DanceArgs,
+    "scare":        ScareArgs,
 }
 
 

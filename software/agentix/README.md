@@ -194,6 +194,7 @@ rather than copied, so the CLI and the agent run the same code.
 | `walk` | planted-foot, stop-and-wait, any of four directions |
 | `scurry` | walk's gait streamed at 50 Hz, open loop; period 2–6 s, refused if the servos cannot follow; stops itself on a supply sag; reports per-joint tracking lag |
 | `dance` | highest frame rate, most servos at once |
+| `scare` | stands on four legs (2–5) with 1 and 6 waving; steps 2 and 5 forward first for tipping margin; stops on a supply sag and steps back to standing |
 
 `lay_down` is `pose_splay()`, which is every joint at centre — that is
 how the conventions were chosen. It moves coxa, then tibia, then femur:
