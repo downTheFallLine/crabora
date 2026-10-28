@@ -2,7 +2,7 @@
 CRABORA flanged body deck, v1 -- BOLTED, not glued
 ==================================================
 
-Replaces the edge-glued hub + mid_ring + outer_ring deck (generate_parts.py),
+Replaces the edge-glued hub + mid_ring + outer_ring deck (glued/generate_parts.py),
 which failed at the glue joints. Same idea -- a flat-top hex deck printed in
 13 pieces (1 hub, 6 mid, 6 outer) -- but every seam now has a FLANGE: a wall
 hanging down from the underside of each piece along that edge. Mating
@@ -73,7 +73,7 @@ SEAM_BOLT_Z = -13.0          # bolt axis height (plate underside is z = 0)
 SEAM_BOLT_PITCH = 35.0       # max spacing between bolts along a seam
 SEAM_BOLT_END_MARGIN = 16.0  # clear of the corner where two flanges meet
 
-# Leg (coxa cap) holes -- copied from generate_parts.py, which copies them
+# Leg (coxa cap) holes -- copied from glued/generate_parts.py, which copies them
 # from ~/crabora/leg/coxa/design_coxa_body_cap.py. Keep in sync.
 CAP_LENGTH = 52.2
 CAP_HORN_OFFSET = 12.5

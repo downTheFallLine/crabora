@@ -32,7 +32,7 @@ networkx>=3.0           # 3.4.2
 # 2D geometry -- design_tibia_link.py builds its outline from polygons.
 shapely>=2.0            # 2.1.2
 
-# unibody/generate_parts.py writes STLs through numpy-stl rather than
+# unibody/glued/generate_parts.py writes STLs through numpy-stl rather than
 # trimesh (`from stl import mesh`).
 numpy-stl>=3.0          # 4.0.0
 
