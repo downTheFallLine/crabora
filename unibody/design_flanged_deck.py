@@ -83,6 +83,12 @@ CAP_EDGE_SETBACK = 5.0
 HORN_HOLE_DIAMETER = 22.0
 MOUNT_HOLE_DIAMETER = 3.4
 
+# Lid magnet puck -- one M3 hole per outer piece, near its +X corner (leg 0
+# frame). design_lid.py reads these, so the lid's sockets land on the pucks.
+# 18.7 mm clear of the corner seam, so the nut misses the flange + fillet.
+LID_PUCK_X = 76.0
+LID_PUCK_Y = 171.0
+
 BED_SIZE = 178.0             # usable A1 mini plate (see memory: keep < ~178)
 CIRCLE_SECTIONS = 48
 
@@ -258,7 +264,8 @@ def build_all():
     # Outer (leg 0): inner + both sides flanged, perimeter edge (index 2) not.
     pieces['deck_outer'] = build_piece(
         ring_segment(MID_OUTER_APOTHEM, DECK_APOTHEM, 0.0),
-        [True, True, False, True], extra_holes=leg_holes(0.0))
+        [True, True, False, True],
+        extra_holes=leg_holes(0.0) + [(LID_PUCK_X, LID_PUCK_Y, MOUNT_HOLE_DIAMETER)])
     return pieces
 
 

@@ -30,6 +30,25 @@ Print with the plate face down and the flanges up, no supports. Use a brim
 on the hub and outer pieces. Use plenty of walls in the flanges: the flange
 root is loaded across the layers when the deck sags.
 
+## Lid
+
+`unibody/design_lid.py` generates a faceted shell over the deck (same
+command). Wall 48 mm, flush with the deck edge in the 5 mm band outside
+the coxa caps, then a 10.6° slope up to a flat top at 60 mm. Every panel
+is an open honeycomb (1.2 mm skin, 1.6 mm wall, 1.8 mm ribs, about 75%
+open), trimmed to run right up to the seams, with a small-hex
+speaker/mic grille in the middle of the hub. 13 pieces, seams in the same
+places as the deck's, bolted through lips inside (72 x M3x8 + nyloc).
+About 240 g of PLA if solid.
+
+It holds on with magnets: a printed puck (`lid_puck.stl`) bolts through
+the `LID_PUCK` hole near one corner of each deck outer piece (M3x12) with
+an 8x3 mm magnet on top, and seats in a socket in the lid with its own
+magnet. On an already-printed deck, drill that hole, 3.4 mm, on each
+of the six edges: 10.8 mm in from the deck edge and 29 mm from the
+corner you reach going clockwise (seen from above) from that edge's leg.
+Put all six deck magnets in with the same face up.
+
 ## Superseded: glued deck
 
 `unibody/glued/` holds the first version (`generate_parts.py` and its
