@@ -55,6 +55,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(_HERE), "walk"))
 sys.path.insert(0, os.path.join(os.path.dirname(_HERE), "stand"))
 sys.path.insert(0, os.path.join(os.path.dirname(_HERE), "dance"))
 
+import power_log  # noqa: E402
 from gait_lib import (  # noqa: E402
     require_bus_free,
     ALL_LEGS, FEMUR_JOINT_DIGIT, FORWARD_SIGN, LEG_BEARING,
@@ -322,6 +323,9 @@ def main():
                     help="run even if the agentix service holds the bus, "
                          "or the measured stance is low")
     ap.add_argument("--ports", nargs="+")
+    ap.add_argument("--power-log", action="store_true",
+                    help="record servo current and supply voltage, then "
+                         "print a verdict and save a CSV to logs/power/")
     args = ap.parse_args()
 
     if not 1 <= args.waves <= 20:
@@ -357,6 +361,7 @@ def main():
     if require_bus_free(args.force):
         return 1
     ports = open_ports(devices)
+    power = power_log.start("scare", args.power_log)
     if not ports:
         print("No URT could be opened.")
         return 1
@@ -407,6 +412,7 @@ def main():
         print(f"\nBus error: {e}")
         return 1
     finally:
+        power_log.finish(power)
         for port in ports.values():
             port.closePort()
 

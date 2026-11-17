@@ -57,6 +57,7 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(os.path.dirname(_HERE), "walk"))
 sys.path.insert(0, os.path.join(os.path.dirname(_HERE), "stand"))
 
+import power_log  # noqa: E402
 from gait_lib import (  # noqa: E402
     require_bus_free,
     ALL_LEGS, BODY_TO_COXA_AXIS, COXA_JOINT_DIGIT, COXA_RADIAL,
@@ -290,6 +291,9 @@ def main():
     ap.add_argument("--force", action="store_true",
                     help="run even if the agentix service holds the bus")
     ap.add_argument("--ports", nargs="+")
+    ap.add_argument("--power-log", action="store_true",
+                    help="record servo current and supply voltage, then "
+                         "print a verdict and save a CSV to logs/power/")
     args = ap.parse_args()
 
     legs = list(dict.fromkeys(args.legs))
@@ -362,6 +366,7 @@ def main():
     if require_bus_free(getattr(args, 'force', False)):
         return 1
     ports = open_ports(devices)
+    power = power_log.start("turn", args.power_log)
     if not ports:
         print("No URT could be opened.")
         return 1
@@ -430,6 +435,7 @@ def main():
         print(f"\nBus error: {e}")
         return 1
     finally:
+        power_log.finish(power)
         for port in ports.values():
             port.closePort()
 

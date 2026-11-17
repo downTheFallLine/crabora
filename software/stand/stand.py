@@ -51,6 +51,7 @@ import time
 sys.path.insert(0, os.path.join(
     os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "walk"))
 
+import power_log  # noqa: E402
 from gait_lib import (  # noqa: E402
     require_bus_free,
     ALL_LEGS, CENTER_POSITION, COXA_JOINT_DIGIT, FEMUR_JOINT_DIGIT,
@@ -59,7 +60,7 @@ from gait_lib import (  # noqa: E402
     ADDR_PRESENT_POSITION, ADDR_TORQUE_ENABLE,
     BusError, PacketHandler,
     confirm, find_joints, find_urt_devices, open_ports, read1, read2,
-    read_status, release, to_counts, to_degrees, write1, write2,
+    power_tick, read_status, release, to_counts, to_degrees, write1, write2,
 )
 from pose import (  # noqa: E402
     GROUND_BELOW_FEMUR, Unreachable, floor_strikes, foot_height, pose_compact,
@@ -169,6 +170,9 @@ def move_group(packet, group, targets, tolerance=POSITION_TOLERANCE):
                 results[key] = (results[key][0], True)
             break
         if pending:
+            # Also read one servo this move is NOT polling (only while a
+            # power log runs), so the planted legs show up in the total.
+            power_tick(packet)
             time.sleep(0.02)
     return results
 
@@ -529,6 +533,9 @@ def main():
     ap.add_argument("--force", action="store_true",
                     help="run even if the agentix service holds the bus")
     ap.add_argument("--ports", nargs="+")
+    ap.add_argument("--power-log", action="store_true",
+                    help="record servo current and supply voltage, then "
+                         "print a verdict and save a CSV to logs/power/")
     args = ap.parse_args()
 
     legs = list(dict.fromkeys(args.legs))
@@ -569,6 +576,7 @@ def main():
     if require_bus_free(getattr(args, 'force', False)):
         return 1
     ports = open_ports(devices)
+    power = power_log.start("stand", args.power_log)
     if not ports:
         print("No URT could be opened.")
         return 1
@@ -756,6 +764,7 @@ def main():
         print(f"\nBus error: {e}")
         return 1
     finally:
+        power_log.finish(power)
         for port in ports.values():
             port.closePort()
 

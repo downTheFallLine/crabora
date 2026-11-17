@@ -256,6 +256,7 @@ ADDR_GOAL_POSITION    = 42
 ADDR_GOAL_SPEED       = 46
 ADDR_PRESENT_POSITION = 56
 ADDR_PRESENT_TEMP     = 63
+ADDR_PRESENT_VOLTAGE  = 62   # 1 byte, 0.1 V
 ADDR_MOVING           = 66
 ADDR_PRESENT_CURRENT  = 69   # 2 bytes, bit 15 = direction
 
@@ -376,6 +377,7 @@ def write1(packet, port, sid, addr, val, what):
 def write2(packet, port, sid, addr, val, what):
     _remember(packet)
     _txrx(lambda: packet.write2ByteTxRx(port, sid, addr, val), sid, what)
+    _KNOWN[sid] = port
     if addr == ADDR_GOAL_POSITION:
         note_goal(sid, val)
 
@@ -403,10 +405,12 @@ def read_status(packet, port, sid, what="status"):
         return data[i] | (data[i + 1] << 8)
 
     amps = decode_current(word(ADDR_PRESENT_CURRENT))
-    note_current(sid, amps)
+    volts = data[ADDR_PRESENT_VOLTAGE - _STATUS_START] / 10.0
+    _KNOWN[sid] = port
+    note_current(sid, amps, volts)
     return {"pos": word(ADDR_PRESENT_POSITION),
             "moving": data[ADDR_MOVING - _STATUS_START],
-            "amps": amps}
+            "amps": amps, "volts": volts}
 
 
 # The last goal position written to each servo: {sid: (counts, when)}.
@@ -430,8 +434,67 @@ def note_goal(sid, counts):
 LAST_CURRENT = {}
 
 
-def note_current(sid, amps):
-    LAST_CURRENT[sid] = (amps, time.monotonic())
+def note_current(sid, amps, volts=None):
+    now = time.monotonic()
+    LAST_CURRENT[sid] = (amps, now)
+    if _POWER is not None:
+        _POWER.append((now, sid, amps, volts, _retries, _failures))
+
+
+# =============================================================
+# POWER LOG
+# =============================================================
+# While a log is running, every read_status() -- from any motion's own
+# polling -- is kept as (t, sid, amps, volts, retries, failures).
+# walk/power_log.py starts and stops it and turns the samples into a
+# verdict. None means not recording, which costs nothing.
+_POWER = None
+
+# Every servo read_status() has seen, {sid: port}, so power_tick() can
+# also read the ones a motion is NOT polling -- the planted legs holding
+# the body up while the swing legs move. Without them the summed current
+# leaves out the legs doing most of the work.
+_KNOWN = {}
+
+# power_tick() reads a servo only if its last reading is older than this.
+POWER_TICK_AGE = 0.15
+
+
+def power_log_start():
+    global _POWER
+    _POWER = []
+
+
+def power_log_stop():
+    """Stop recording; return the samples."""
+    global _POWER
+    samples, _POWER = _POWER or [], None
+    return samples
+
+
+def power_logging():
+    return _POWER is not None
+
+
+def power_tick(packet):
+    """While logging, read the one servo whose reading is stalest.
+
+    Motions call this from their wait loops. One extra round trip per
+    call (~1-2 ms), and only while a log is running. A failed read is
+    counted in bus_stats() and otherwise ignored: losing an extra
+    reading is no reason to abort a move, and the retry count is itself
+    part of what the log reports.
+    """
+    if _POWER is None or not _KNOWN:
+        return
+    now = time.monotonic()
+    sid = min(_KNOWN, key=lambda s: LAST_CURRENT.get(s, (0, 0.0))[1])
+    if now - LAST_CURRENT.get(sid, (0, 0.0))[1] < POWER_TICK_AGE:
+        return
+    try:
+        read_status(packet, _KNOWN[sid], sid, "power reading")
+    except BusError:
+        pass
 
 
 # =============================================================

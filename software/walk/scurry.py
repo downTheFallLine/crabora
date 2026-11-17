@@ -90,13 +90,14 @@ _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _HERE)
 sys.path.insert(0, os.path.join(os.path.dirname(_HERE), "stand"))
 
+import power_log  # noqa: E402
 from gait_lib import (  # noqa: E402
     require_bus_free,
     ALL_LEGS, COXA_JOINT_DIGIT, FEMUR_JOINT_DIGIT, LEG_NAME,
     TIBIA_JOINT_DIGIT, TRIPOD_A, TRIPOD_B, tripod_gap, ground_clearance,
     ADDR_GOAL_POSITION, ADDR_GOAL_SPEED, ADDR_MAX_ANGLE, ADDR_MIN_ANGLE,
     ADDR_TORQUE_ENABLE, BusError, PacketHandler,
-    bus_stats, read_status, reset_bus_stats,
+    bus_stats, power_tick, read_status, reset_bus_stats,
     confirm, find_joints, find_urt_devices, note_goal, open_ports, read1, read2,
     write1, write2,
 )
@@ -504,9 +505,10 @@ class Streamer:
                    "acceleration")
 
     def volts(self, leg):
+        # read_status rather than a 1-byte voltage read: same round trip,
+        # and the current comes back too for agentix and the power log.
         sid, port = self.joints[FEMUR_JOINT_DIGIT][leg]
-        return read1(self.packet, port, sid, ADDR_PRESENT_VOLTAGE,
-                     "voltage") / 10.0
+        return read_status(self.packet, port, sid, "voltage")["volts"]
 
 
 def reposition(st, current, target, lift):
@@ -602,6 +604,10 @@ def run_scurry(st, p, args, *, should_cancel=None, log=print):
                 next_lag = t + LAG_EVERY
                 st.sample_lag(lag_i)
                 lag_i += 1
+            else:
+                # Only while a power log runs: one servo per otherwise
+                # read-free frame, so the whole robot gets sampled.
+                power_tick(st.packet)
 
             if should_cancel is not None and should_cancel():
                 stopped = "cancelled"
@@ -724,6 +730,9 @@ def main():
     ap.add_argument("--dry-run", action="store_true",
                     help="print the plan, touch nothing")
     ap.add_argument("--ports", nargs="+")
+    ap.add_argument("--power-log", action="store_true",
+                    help="record servo current and supply voltage, then "
+                         "print a verdict and save a CSV to logs/power/")
     args = ap.parse_args()
 
     legs = sorted(set(args.legs))
@@ -769,6 +778,7 @@ def main():
     if require_bus_free(args.force):
         return 1
     ports = open_ports(devices)
+    power = power_log.start("scurry", args.power_log)
     if not ports:
         print("No URT could be opened.")
         return 1
@@ -858,6 +868,7 @@ def main():
         print(f"\nBus error: {e}")
         return 1
     finally:
+        power_log.finish(power)
         for port in ports.values():
             port.closePort()
 

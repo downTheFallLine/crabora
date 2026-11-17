@@ -152,7 +152,10 @@ Gotchas:
   directly and let the URTs carry data only.
 
 Verify the table above with an inline watt meter between the buck and the
-URTs, running stand, walk and scurry.
+URTs, running stand, walk and scurry. Until then, `--power-log` on any
+motion program (and `utils/power_watch.py` for standing still) reads each
+servo's own current and supply voltage and reports whether the buck is
+current-limiting; see software/README.md, "Measuring power".
 
 ## LOGIPOWER: Pi and sensors
 

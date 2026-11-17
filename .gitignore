@@ -28,3 +28,6 @@ software/imu_calibration.json
 # the robot (root-owned, 0600); these patterns only catch a stray copy.
 *.env
 agentix.env
+
+# Run logs written on the Pi (power logs etc.)
+software/logs/

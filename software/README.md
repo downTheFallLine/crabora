@@ -128,6 +128,24 @@ up the tripod gait. `walk.py` walks in any direction with the feet held
 planted, stop-and-wait; `scurry.py` is the same gait streamed on a clock
 for speed (see [walk/README.md](walk/README.md)).
 
+### Measuring power
+
+```bash
+python3 walk/scurry.py 300 --power-log    # any motion program takes it
+python3 utils/power_watch.py --seconds 20 # standing still, after stand.py
+python3 walk/power_log.py logs/power/scurry-20261116-142200.csv  # re-read
+```
+
+At the end it prints the peak and typical summed current, the supply
+voltage, and a verdict: **HITTING THE WALL** (the voltage sags when the
+current is high, so the LM2596 is current-limiting), **COPING** (high
+current, no sag), **SAG WITHOUT HIGH CURRENT** (look at the pack or
+wiring), or **WELL INSIDE THE LIMIT**. A CSV of every reading lands in
+`software/logs/power/` (git-ignored). The total is the sum of each
+servo's latest reading, from servos read one at a time, using Feetech's
+6.5 mA per count -- an estimate. The voltage is the more trustworthy
+half: the buck holds 7.4 V until it runs out of current.
+
 ---
 
 ## Shared code
@@ -148,9 +166,11 @@ machine with no servo SDK installed.
 
 - **Power is unmeasured.** The LM2596 passes 2–3 A on paper. It now
   regulates 7.4 V from a 3S pack, and the robot stands and turns on it.
-  The 20 A replacement buck arrived defective and is being returned. An
-  inline watt-meter would settle whether the LM2596 is a ceiling or a
-  non-issue before walking leans on it.
+  The 20 A replacement buck arrived defective and is being returned.
+  Every motion program now takes `--power-log` (see "Measuring power"
+  below), which reads the servos' own current and voltage and says
+  whether the buck is the wall. An inline watt-meter is still the ground
+  truth and would calibrate the servos' readings.
 - **Walking speed.** `walk.py` walks; `scurry.py` should walk faster but
   has not yet run on hardware, and quick tripod reversals are where the
   unmeasured power path is most likely to show.
