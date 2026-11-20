@@ -34,6 +34,7 @@ than asking the model how the robot is.
 |---|---|
 | `arbiter.py` | the only thing that touches the servo bus. One lock, ports held open, and `emergency_stop()` |
 | `tools.py` | what the agent may call. Read-only in phase 1 |
+| `camera.py` | the USB webcam: MJPEG over V4L2, standard library only, one owner |
 | `app.py` | Flask API, and serves `web/` during development |
 | `web/` | the UI: chat pane plus a fixed control strip |
 
@@ -61,6 +62,9 @@ so rather than failing.
 | `GET /api/status` | robot health summary — cheap, for polling |
 | `GET /api/tools` | what the agent can call |
 | `POST /api/tools/<name>` | call one tool directly, no model involved |
+| `GET /api/camera` | camera found, capturing, frame counters, last error |
+| `GET /api/camera.jpg` | one fresh frame |
+| `GET /api/camera.mjpg` | live view, multipart MJPEG at ~8 frames/s |
 | `POST /api/chat` | natural language in, answer out |
 | `POST /api/stop` | **emergency stop** |
 
@@ -208,6 +212,28 @@ Long motions poll `arbiter.stopping` between steps. STOP sets that flag
 lock would make STOP wait for it, which is the one thing it must never
 do. The motion drops out at its next step, then STOP takes the bus and
 releases torque.
+
+## The camera
+
+A USB webcam (a HUE HD Camera, 1280×720 MJPEG) is the robot's eye.
+`camera.py` asks the kernel for the JPEGs the camera already made --
+four ioctls and an mmap, no OpenCV, no decode on the Pi -- and keeps the
+newest one. Everything shares that one capture: the live view on the
+page, any number of browsers, and the agent.
+
+- **Live view.** The page shows `/api/camera.mjpg` in a plain `<img>`.
+  The browser does the decoding. It stops when switched off or when the
+  tab is hidden, and the Pi stops capturing 30 s after the last request.
+- **What do you see?** The agent has a `look` tool that sends one frame
+  to the model as an image; the button under the live view just asks
+  that question in the chat, so it is spoken when voice is on.
+- **Permissions.** The service user must be in the `video` group
+  (`sudo usermod -aG video ubuntu`, then restart the service).
+- **When it stops.** The Pi 3's USB controller (`dwc2`) can wedge the
+  camera -- `dwc2_hc_halt() Channel can't be halted` in `dmesg`, and no
+  frames from any program, `fswebcam` included. Unplug and replug the
+  camera, or reboot. `GET /api/camera` shows `timeouts` climbing with
+  `frames` stuck at 0 when this is the problem.
 
 ## Replies: Markdown, and a spoken summary
 

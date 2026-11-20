@@ -19,6 +19,7 @@ raises, app.py catches it, and the UI says chat is unavailable while
 every tool and the control strip keep working.
 """
 
+import base64
 import os
 import re
 import sys
@@ -33,6 +34,7 @@ from langchain_core.messages import (                         # noqa: E402
 from langchain_core.tools import StructuredTool               # noqa: E402
 from pydantic import BaseModel, Field                         # noqa: E402
 
+from camera import look                                       # noqa: E402
 from motion import MOTION_HELP, MOTION_TOOLS, NUDGE_MAX_DEG   # noqa: E402
 from tools import READ_ONLY_TOOLS, TOOL_HELP                  # noqa: E402
 
@@ -90,6 +92,21 @@ Answer like an engineer talking to the person who built the robot:
 short, concrete, numbers where they matter. Lead with the answer. If
 something looks wrong, say what it is and what would fix it. Do not pad
 with caveats, and do not list everything you checked unless it helps.
+
+You have an eye: a USB webcam on the robot. The look tool returns a
+fresh photo from it. Use it whenever someone asks what the robot sees,
+what is in front of it, where something is, or whether the way is clear
+-- and look again rather than relying on an earlier photo, because the
+robot and the people around it move. When you describe a picture:
+- Name what is actually there, most prominent or closest first. Say
+  where each thing is (left, centre, right; near or far) and give rough
+  distances only as rough guesses -- one camera cannot measure depth.
+- Assume the camera faces the robot's front, so the left of the photo
+  is the robot's left, unless the picture plainly shows otherwise.
+- If the picture is dark, blurred or blocked, say so rather than guess.
+- Never move the robot just to get a better look unless asked to.
+- Children use this robot. Keep descriptions friendly, and do not try
+  to identify people by name.
 
 One thing worth flagging when it comes up, because it is known and
 unresolved: the servo power converter is a small LM2596 good for about
@@ -208,8 +225,31 @@ def _bind2(fn, arbiter, safety):
     return call
 
 
+LOOK_HELP = ("Take a photo with the robot's camera and see it. Use for "
+             "anything about what the robot can see. No arguments.")
+
+
+def tool_content(result):
+    """A tool result as ToolMessage content.
+
+    Plain results go back as their string form, as they always have. A
+    result carrying "image_jpeg" (camera.look) goes back as an image
+    block plus the rest as text, so the model sees the photo rather than
+    a repr of 80 KB of bytes."""
+    if not (isinstance(result, dict) and "image_jpeg" in result):
+        return str(result)
+    meta = {k: v for k, v in result.items() if k != "image_jpeg"}
+    return [
+        {"type": "text", "text": f"camera frame {meta}"},
+        {"type": "image", "source": {
+            "type": "base64", "media_type": "image/jpeg",
+            "data": base64.b64encode(result["image_jpeg"]).decode("ascii")}},
+    ]
+
+
 class Agent:
-    def __init__(self, arbiter, safety=None, model=MODEL, effort=EFFORT):
+    def __init__(self, arbiter, safety=None, model=MODEL, effort=EFFORT,
+                 camera=None):
         self.model_name = model
         self._arbiter = arbiter
         self._safety = safety
@@ -235,6 +275,10 @@ class Agent:
                 )
                 for name, fn in sorted(MOTION_TOOLS.items())
             ]
+        if camera is not None:
+            self._tools.append(StructuredTool.from_function(
+                func=lambda: look(camera), name="look",
+                description=LOOK_HELP, args_schema=NoArgs))
         kwargs = {}
         if WORKSPACE_ID:
             kwargs["default_headers"] = {
@@ -289,7 +333,8 @@ class Agent:
                         # says "leg 3 isn't answering" beats a 500.
                         result = {"error": f"{type(e).__name__}: {e}"}
                 messages.append(ToolMessage(
-                    content=str(result), tool_call_id=call.get("id", name)))
+                    content=tool_content(result),
+                    tool_call_id=call.get("id", name)))
 
         msg = ("I kept needing more information and ran out of steps. "
                "Try asking something narrower.")
@@ -352,10 +397,10 @@ def plain_summary(text, words=SPOKEN_WORDS):
     return " ".join(w[:words]) + ("…" if len(w) > words else "")
 
 
-def build_agent(arbiter, safety=None):
+def build_agent(arbiter, safety=None, camera=None):
     """Raises if no credentials, so app.py can degrade cleanly."""
     if not (os.environ.get("ANTHROPIC_API_KEY")
             or os.environ.get("ANTHROPIC_AUTH_TOKEN")):
         raise RuntimeError(
             "no ANTHROPIC_API_KEY set -- chat is disabled, tools still work")
-    return Agent(arbiter, safety)
+    return Agent(arbiter, safety, camera=camera)

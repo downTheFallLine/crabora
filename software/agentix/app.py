@@ -13,6 +13,9 @@ Endpoints:
     GET  /api/imu           pitch and roll, for the tilt widget (polled)
     GET  /api/leg/<n>       one leg's joint angles, for the leg animation
     GET  /api/current       every servo's current draw, for the power view
+    GET  /api/camera        is there a camera, is it capturing
+    GET  /api/camera.jpg    one fresh frame
+    GET  /api/camera.mjpg   live view (multipart MJPEG, ~8 frames/s)
     GET  /api/tools         what the agent can call, and what each does
     POST /api/tools/<name>  call one tool directly, bypassing the model
     POST /api/chat          natural language in, answer out
@@ -46,12 +49,14 @@ sys.path.insert(0, _HERE)
 sys.path.insert(0, os.path.dirname(_HERE))
 
 try:
-    from flask import Flask, jsonify, request, send_from_directory
+    from flask import (Flask, Response, jsonify, request,
+                       send_from_directory)
 except ImportError:
     print("flask is not installed:  python3 -m pip install flask")
     sys.exit(1)
 
 from arbiter import Arbiter, ArbiterError, Busy, Cancelled  # noqa: E402
+from camera import Camera, CameraError                 # noqa: E402
 from motion import MOTION_HELP, MOTION_TOOLS, Unsafe   # noqa: E402
 from safety import NotArmed, Safety                    # noqa: E402
 from tools import (  # noqa: E402
@@ -63,6 +68,9 @@ WEB_DIR = os.path.join(_HERE, "web")
 app = Flask(__name__, static_folder=None)
 ARB = None
 AGENT = None
+# Not on the servo bus and needs no arbiter: video works with the bus
+# down, during a motion, and with --no-bus.
+CAM = Camera()
 # The arming gate. Lives here, beside the HTTP routes, because arming is
 # a human action over a route the tool layer cannot call.
 #
@@ -88,7 +96,8 @@ class _QuietPolls(logging.Filter):
     def filter(self, record):
         msg = record.getMessage()
         return not any(p in msg for p in
-                       ("/api/imu ", "/api/leg/", "/api/current "))
+                       ("/api/imu ", "/api/leg/", "/api/current ",
+                        "/api/camera"))
 
 
 logging.getLogger("werkzeug").addFilter(_QuietPolls())
@@ -157,6 +166,46 @@ def leg(leg):
 def current():
     # Never waits on the bus -- see Arbiter.try_currents.
     return jsonify({"ok": True, "result": servo_currents(ARB)})
+
+
+_NO_CACHE = {"Cache-Control": "no-store"}
+
+
+@app.get("/api/camera")
+def camera_state():
+    return jsonify({"ok": True, "result": CAM.describe()})
+
+
+@app.get("/api/camera.jpg")
+def camera_snapshot():
+    try:
+        return Response(CAM.snapshot(), mimetype="image/jpeg",
+                        headers=_NO_CACHE)
+    except CameraError as e:
+        return _fail(str(e), 503)
+
+
+@app.get("/api/camera.mjpg")
+def camera_stream():
+    """Live view. Each frame is the camera's own JPEG, passed through
+    untouched -- no decode on the Pi. One request is one viewer; it ends
+    when the browser closes the image or the camera goes away."""
+    try:
+        CAM.snapshot()              # fail fast with a 503, not a dead <img>
+    except CameraError as e:
+        return _fail(str(e), 503)
+
+    def parts():
+        try:
+            for jpeg in CAM.frames():
+                yield (b"--frame\r\nContent-Type: image/jpeg\r\n"
+                       b"Content-Length: " + str(len(jpeg)).encode() +
+                       b"\r\n\r\n" + jpeg + b"\r\n")
+        except CameraError:
+            return
+
+    return Response(parts(), headers=_NO_CACHE,
+                    mimetype="multipart/x-mixed-replace; boundary=frame")
 
 
 @app.get("/api/tools")
@@ -368,7 +417,7 @@ def main():
 
     try:
         from agent import build_agent
-        AGENT = build_agent(ARB, SAFE)
+        AGENT = build_agent(ARB, SAFE, camera=CAM)
         print(f"  agent: {AGENT.describe()['model']}")
     except Exception as e:                            # noqa: BLE001
         AGENT = None

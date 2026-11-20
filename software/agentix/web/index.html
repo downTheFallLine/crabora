@@ -59,47 +59,58 @@
   </div>
 </header>
 
-<main>
+<!-- Five panes, each one a <details> so it opens and closes on its own
+     header. One column; two when the window is wide enough, with the
+     chat across the full width underneath. A closed pane stops polling
+     (the camera stops streaming) and its header keeps a one-line
+     summary. Open/closed is remembered per browser. -->
+<main class="panes">
   <!-- Tilt from the IMU, drawn as the robot itself: seen from behind for
        roll, from its right side for pitch. True angles, not exaggerated
        -- the ticks are there so a few degrees can still be read. -->
-  <section class="tilt" id="tilt" aria-label="Body tilt from the IMU">
-    <figure class="gauge">
-      <svg viewBox="-50 -40 100 80" aria-hidden="true">
-        <path class="ticks" d="M0,-34 L0,-30 M-11.6,-31.9 L-10.3,-28.2 M11.6,-31.9 L10.3,-28.2 M-5.9,-33.5 L-5.2,-29.5 M5.9,-33.5 L5.2,-29.5 M-21.9,-26.1 L-19.3,-23 M21.9,-26.1 L19.3,-23"/>
-        <line class="level" x1="-46" y1="0" x2="46" y2="0"/>
-        <g class="body" id="roll-body">
-          <line class="pointer" x1="0" y1="0" x2="0" y2="-28"/>
-          <path class="legs" d="M-24,0 L-34,-9 L-40,13 M24,0 L34,-9 L40,13"/>
-          <rect x="-25" y="-5" width="50" height="10" rx="3"/>
-        </g>
-        <text x="-46" y="34">L</text><text x="46" y="34" text-anchor="end">R</text>
-      </svg>
-      <figcaption>roll <b id="roll-val">—</b></figcaption>
-    </figure>
-    <figure class="gauge">
-      <svg viewBox="-50 -40 100 80" aria-hidden="true">
-        <path class="ticks" d="M0,-34 L0,-30 M-11.6,-31.9 L-10.3,-28.2 M11.6,-31.9 L10.3,-28.2 M-5.9,-33.5 L-5.2,-29.5 M5.9,-33.5 L5.2,-29.5 M-21.9,-26.1 L-19.3,-23 M21.9,-26.1 L19.3,-23"/>
-        <line class="level" x1="-46" y1="0" x2="46" y2="0"/>
-        <g class="body" id="pitch-body">
-          <line class="pointer" x1="0" y1="0" x2="0" y2="-28"/>
-          <path class="legs" d="M-22,0 L-26,13 M0,0 L0,13 M22,0 L26,13"/>
-          <rect x="-30" y="-5" width="60" height="10" rx="3"/>
-          <path class="nose" d="M30,-4 L37,0 L30,4 Z"/>
-        </g>
-        <text x="-46" y="34">rear</text><text x="46" y="34" text-anchor="end">front</text>
-      </svg>
-      <figcaption>pitch <b id="pitch-val">—</b></figcaption>
-    </figure>
-    <div class="tilt-meta">
-      <div class="tilt-state" id="tilt-state">IMU</div>
-      <div class="tilt-detail" id="tilt-detail">waiting…</div>
-    </div>
+  <details class="pane" id="pane-tilt" open>
+    <summary><span class="pane-title">Level</span><span class="pane-sum" id="sum-tilt"></span></summary>
+    <section class="pane-body tilt" id="tilt" aria-label="Body tilt from the IMU">
+      <figure class="gauge">
+        <svg viewBox="-50 -40 100 80" aria-hidden="true">
+          <path class="ticks" d="M0,-34 L0,-30 M-11.6,-31.9 L-10.3,-28.2 M11.6,-31.9 L10.3,-28.2 M-5.9,-33.5 L-5.2,-29.5 M5.9,-33.5 L5.2,-29.5 M-21.9,-26.1 L-19.3,-23 M21.9,-26.1 L19.3,-23"/>
+          <line class="level" x1="-46" y1="0" x2="46" y2="0"/>
+          <g class="body" id="roll-body">
+            <line class="pointer" x1="0" y1="0" x2="0" y2="-28"/>
+            <path class="legs" d="M-24,0 L-34,-9 L-40,13 M24,0 L34,-9 L40,13"/>
+            <rect x="-25" y="-5" width="50" height="10" rx="3"/>
+          </g>
+          <text x="-46" y="34">L</text><text x="46" y="34" text-anchor="end">R</text>
+        </svg>
+        <figcaption>roll <b id="roll-val">—</b></figcaption>
+      </figure>
+      <figure class="gauge">
+        <svg viewBox="-50 -40 100 80" aria-hidden="true">
+          <path class="ticks" d="M0,-34 L0,-30 M-11.6,-31.9 L-10.3,-28.2 M11.6,-31.9 L10.3,-28.2 M-5.9,-33.5 L-5.2,-29.5 M5.9,-33.5 L5.2,-29.5 M-21.9,-26.1 L-19.3,-23 M21.9,-26.1 L19.3,-23"/>
+          <line class="level" x1="-46" y1="0" x2="46" y2="0"/>
+          <g class="body" id="pitch-body">
+            <line class="pointer" x1="0" y1="0" x2="0" y2="-28"/>
+            <path class="legs" d="M-22,0 L-26,13 M0,0 L0,13 M22,0 L26,13"/>
+            <rect x="-30" y="-5" width="60" height="10" rx="3"/>
+            <path class="nose" d="M30,-4 L37,0 L30,4 Z"/>
+          </g>
+          <text x="-46" y="34">rear</text><text x="46" y="34" text-anchor="end">front</text>
+        </svg>
+        <figcaption>pitch <b id="pitch-val">—</b></figcaption>
+      </figure>
+      <div class="tilt-meta">
+        <div class="tilt-state" id="tilt-state">IMU</div>
+        <div class="tilt-detail" id="tilt-detail">waiting…</div>
+      </div>
+    </section>
+  </details>
 
-    <!-- One leg, animated: side view in the leg's own vertical plane
-         (femur and tibia), top view for the coxa swing. Drawn from the
-         same kinematics the gaits use (pose.leg_fk), in millimetres. -->
-    <div class="legview" id="legview" data-source="none">
+  <!-- One leg, animated: side view in the leg's own vertical plane
+       (femur and tibia), top view for the coxa swing. Drawn from the
+       same kinematics the gaits use (pose.leg_fk), in millimetres. -->
+  <details class="pane" id="pane-leg" open>
+    <summary><span class="pane-title">Leg angles</span><span class="pane-sum" id="sum-leg"></span></summary>
+    <div class="pane-body legview" id="legview" data-source="none">
       <figure class="gauge leg-side">
         <svg viewBox="-45 -125 280 250" aria-hidden="true">
           <line class="level" x1="-45" y1="0" x2="235" y2="0"/>
@@ -133,11 +144,14 @@
         <div class="tilt-detail" id="leg-src">waiting…</div>
       </div>
     </div>
+  </details>
 
-    <!-- Servo current: every joint's draw, and their sum against the
-         servo buck's ceiling. Live during walk and scurry too: the
-         gaits' own polling leaves readings behind (gait_lib.LAST_CURRENT). -->
-    <div class="power" id="power" data-source="none" data-level="none">
+  <!-- Servo current: every joint's draw, and their sum against the
+       servo buck's ceiling. Live during walk and scurry too: the
+       gaits' own polling leaves readings behind (gait_lib.LAST_CURRENT). -->
+  <details class="pane" id="pane-power" open>
+    <summary><span class="pane-title">Power</span><span class="pane-sum" id="sum-power"></span></summary>
+    <div class="pane-body power" id="power" data-source="none" data-level="none">
       <table class="amps" aria-label="Current per servo, amps">
         <thead><tr><th></th><th>coxa</th><th>femur</th><th>tibia</th></tr></thead>
         <tbody id="amps-body"></tbody>
@@ -149,26 +163,50 @@
         <div class="tilt-detail" id="power-src">waiting…</div>
       </div>
     </div>
-  </section>
+  </details>
 
-  <div class="log" id="log" aria-live="polite">
-    <div class="msg bot">
-      <div class="who">crabora</div>
-      <div class="body">
-        <p>I can look at the robot and move it. <strong>STOP</strong>
-           drops all the servos at once if anything looks wrong.</p>
-        <p>Ask me things like <em>“is anything faulted?”</em>,
-           <em>“nudge leg 3’s femur up 10 degrees”</em> or
-           <em>“lay down, then stand back up at 90mm”</em></p>
+  <!-- The robot's eye: live view from its webcam (/api/camera.mjpg, the
+       camera's own JPEGs passed through), and a button that asks the
+       agent to look and say what it sees. The stream only runs while
+       it is switched on, this pane is open and the tab is visible. -->
+  <details class="pane" id="pane-eye" open>
+    <summary><span class="pane-title">Camera</span><span class="pane-sum" id="sum-eye"></span></summary>
+    <section class="pane-body eye" id="eye" data-state="off" aria-label="Camera">
+      <div class="eye-frame">
+        <img id="eye-img" alt="Live view from the robot's camera">
+        <div class="eye-msg" id="eye-msg">camera off</div>
       </div>
-    </div>
-  </div>
+      <div class="eye-ctl">
+        <button class="btn look" id="eye-look">What do you see?</button>
+        <button class="btn" id="eye-toggle" aria-pressed="false">Camera on</button>
+        <div class="tilt-detail" id="eye-src"></div>
+      </div>
+    </section>
+  </details>
 
-  <form class="composer" id="composer" autocomplete="off">
-    <input id="prompt" type="text" placeholder="Ask about the robot…"
-           aria-label="Message">
-    <button type="submit" id="send">Send</button>
-  </form>
+  <details class="pane pane-chat" id="pane-chat" open>
+    <summary><span class="pane-title">Chat</span><span class="pane-sum" id="sum-chat"></span></summary>
+    <div class="pane-body chat">
+      <div class="log" id="log" aria-live="polite">
+        <div class="msg bot">
+          <div class="who">crabora</div>
+          <div class="body">
+            <p>I can look at the robot and move it. <strong>STOP</strong>
+               drops all the servos at once if anything looks wrong.</p>
+            <p>Ask me things like <em>“is anything faulted?”</em>,
+               <em>“nudge leg 3’s femur up 10 degrees”</em> or
+               <em>“lay down, then stand back up at 90mm”</em></p>
+          </div>
+        </div>
+      </div>
+
+      <form class="composer" id="composer" autocomplete="off">
+        <input id="prompt" type="text" placeholder="Ask about the robot…"
+               aria-label="Message">
+        <button type="submit" id="send">Send</button>
+      </form>
+    </div>
+  </details>
 </main>
 
 <!-- Markdown for bot replies: marked parses, DOMPurify sanitises (the

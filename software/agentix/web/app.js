@@ -12,6 +12,30 @@
 const $ = (id) => document.getElementById(id);
 const log = $("log");
 
+/* ---------------- panes ----------------
+ * Each instrument and the chat is a <details> pane. Open/closed is
+ * remembered in this browser. A closed pane is treated like a hidden
+ * tab: its poll drops to the idle rate and skips the request, and the
+ * camera stops streaming. Its header shows a one-line summary instead,
+ * kept up to date only from readings that arrive anyway. */
+const PANE_KEY = "crabora.panes";
+const paneOpen = (id) => { const p = $(id); return !p || p.open; };
+const paneSum = (id, text) => { const n = $(id); if (n) n.textContent = text; };
+(function restorePanes() {
+  let saved = {};
+  try { saved = JSON.parse(localStorage.getItem(PANE_KEY) || "{}") || {}; }
+  catch { /* blocked or junk */ }
+  document.querySelectorAll("details.pane").forEach((p) => {
+    if (p.id in saved) p.open = !!saved[p.id];
+    p.addEventListener("toggle", () => {
+      const now = {};
+      document.querySelectorAll("details.pane").forEach((q) => (now[q.id] = q.open));
+      try { localStorage.setItem(PANE_KEY, JSON.stringify(now)); } catch { /* blocked */ }
+    });
+  });
+})();
+const onPane = (id, fn) => { const p = $(id); if (p) p.addEventListener("toggle", () => fn(p.open)); };
+
 function el(tag, cls, text) {
   const n = document.createElement(tag);
   if (cls) n.className = cls;
@@ -27,6 +51,9 @@ function say(who, cls, build) {
   msg.appendChild(body);
   log.appendChild(msg);
   log.scrollTop = log.scrollHeight;
+  // Shut chat pane: the header shows the latest line instead.
+  const line = body.textContent.replace(/\s+/g, " ").trim();
+  paneSum("sum-chat", line ? `${who}: ${line}` : who);
   return msg;
 }
 
@@ -270,6 +297,8 @@ function showTilt(r) {
   $("tilt-detail").textContent =
     `${r.g_total.toFixed(2)} g · ${steady ? "steady" : "moving, approximate"}` +
     ` · ${r.temp_c.toFixed(0)}\u00b0C`;
+  paneSum("sum-tilt", `${$("tilt-state").textContent} · roll ${deg(r.roll_deg)}` +
+                      ` · pitch ${deg(r.pitch_deg)}`);
   t.title = "Roll: + is left side up. Pitch: + is nose up.";
 }
 
@@ -282,12 +311,14 @@ function noTilt(state, detail) {
   $("tilt-state").textContent = state;
   $("tilt-detail").textContent = detail;
   t.title = detail;
+  paneSum("sum-tilt", state);
 }
 
 async function refreshTilt() {
   clearTimeout(tiltTimer);
   let next = TILT_MS;
-  if (!document.hidden) {
+  if (!paneOpen("pane-tilt")) next = TILT_IDLE_MS;
+  else if (!document.hidden) {
     try {
       const r = (await api("/api/imu")).result;
       if (r.fitted) showTilt(r);
@@ -302,6 +333,7 @@ async function refreshTilt() {
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) refreshTilt();
 });
+onPane("pane-tilt", (open) => open && refreshTilt());
 refreshTilt();
 
 /* ---------------- leg animation ----------------
@@ -401,7 +433,7 @@ async function refreshLeg() {
   clearTimeout(legTimer);
   const leg = Number($("leg-pick").value);
   let next = LEG_POLL_MS;
-  if (!document.hidden) {
+  if (!document.hidden && paneOpen("pane-leg")) {
     try {
       const r = (await api(`/api/leg/${leg}`)).result;
       $("legview").dataset.source = r.source;
@@ -414,6 +446,8 @@ async function refreshLeg() {
         $("leg-tibia-val").textContent = fmt(r.tibia_flex_deg);
         $("leg-coxa-val").textContent = fmt(r.coxa_forward_deg);
         $("leg-src").textContent = LEG_SOURCE[r.source] || r.source;
+        paneSum("sum-leg", `leg ${leg} · coxa ${fmt(r.coxa_forward_deg)}` +
+                           ` · femur ${fmt(r.femur_up_deg)} · tibia ${fmt(r.tibia_flex_deg)}`);
         if (!legRaf) legRaf = requestAnimationFrame(legFrame);
       }
     } catch (e) {
@@ -437,6 +471,7 @@ $("leg-pick").addEventListener("change", () => {
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) refreshLeg();
 });
+onPane("pane-leg", (open) => open && refreshLeg());
 drawSide(0, 90);
 drawLegs(Number($("leg-pick").value), 0);
 refreshLeg();
@@ -505,13 +540,14 @@ function showPower(r) {
     `peak ${powerPeak.toFixed(2)} A · buck ~${BUCK_A} A`;
   $("power-src").textContent =
     `${moving ? "during motion" : "measured"} · ${r.servos} servos`;
+  paneSum("sum-power", `${t.toFixed(2)} A · peak ${powerPeak.toFixed(2)} A`);
   p.title = r.note || "";
 }
 
 async function refreshPower() {
   clearTimeout(powerTimer);
   let next = POWER_POLL_MS;
-  if (!document.hidden) {
+  if (!document.hidden && paneOpen("pane-power")) {
     try {
       const r = (await api("/api/current")).result;
       showPower(r);
@@ -530,6 +566,7 @@ async function refreshPower() {
 document.addEventListener("visibilitychange", () => {
   if (!document.hidden) refreshPower();
 });
+onPane("pane-power", (open) => open && refreshPower());
 refreshPower();
 
 /* ---------------- motion enable ----------------
@@ -1072,9 +1109,92 @@ $("composer").addEventListener("submit", async (ev) => {
   // In a conversation the loop does the speaking for its own turns; a
   // typed question in the middle of one is answered aloud too.
   if (reply && (speakReplies || talkMode)) speak(reply.spoken);
-  input.focus();
+  input.focus({ preventScroll: true });
 });
+
+/* ---------------- camera ----------------
+ * The live view is a plain <img> on a multipart MJPEG stream: the
+ * browser does all the decoding, the Pi just forwards the camera's
+ * JPEGs. Dropping the src closes the connection, which is how the
+ * stream stops when the camera is switched off or the tab is hidden --
+ * and after 30 s with nobody asking, the Pi stops capturing too. */
+const EYE_RETRY_MS = 10000;
+const BLANK = "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7";
+let eyeOn = true, eyeRetry = null;
+try { eyeOn = localStorage.getItem("crabora.eye") !== "off"; } catch (e) { /* private window */ }
+
+function eyeState(state, msg) {
+  $("eye").dataset.state = state;
+  if (msg !== undefined) $("eye-msg").textContent = msg;
+  paneSum("sum-eye", !eyeOn ? "off" : state === "live" ? "live" : $("eye-msg").textContent);
+  const t = $("eye-toggle");
+  t.textContent = eyeOn ? "Camera off" : "Camera on";
+  t.setAttribute("aria-pressed", String(eyeOn));
+}
+
+function eyeStop(msg) {
+  clearTimeout(eyeRetry);
+  const img = $("eye-img");
+  img.onload = img.onerror = null;
+  img.src = BLANK;
+  eyeState("off", msg);
+}
+
+function eyeStart() {
+  clearTimeout(eyeRetry);
+  if (!eyeOn || document.hidden || !paneOpen("pane-eye")) return;
+  const img = $("eye-img");
+  eyeState("connecting", "connecting…");
+  img.onload = () => {
+    eyeState("live");
+    $("eye-src").textContent = "live";
+  };
+  img.onerror = async () => {
+    // An <img> cannot read the 503's reason; ask for it.
+    let why = "no picture";
+    try {
+      const c = (await api("/api/camera")).result;
+      why = c.error || (c.device ? "camera not sending" : "no camera plugged in");
+    } catch (e) { why = `offline: ${e.message}`; }
+    eyeState("error", why);
+    $("eye-src").textContent = "retrying…";
+    eyeRetry = setTimeout(eyeStart, EYE_RETRY_MS);
+  };
+  img.src = `/api/camera.mjpg?t=${Date.now()}`;
+}
+
+$("eye-toggle").addEventListener("click", () => {
+  eyeOn = !eyeOn;
+  try { localStorage.setItem("crabora.eye", eyeOn ? "on" : "off"); } catch (e) { /* ignore */ }
+  if (eyeOn) eyeStart();
+  else { eyeStop("camera off"); $("eye-src").textContent = ""; }
+});
+
+document.addEventListener("visibilitychange", () => {
+  if (document.hidden) eyeStop("paused");
+  else eyeStart();
+});
+onPane("pane-eye", (open) => {
+  if (!open) eyeStop(eyeOn ? "paused" : "camera off");
+  else if (eyeOn) eyeStart();
+});
+
+// Ask the agent to look. Same path as a typed question, so it shows up
+// in the chat and is spoken when voice is on.
+$("eye-look").addEventListener("click", async () => {
+  const b = $("eye-look");
+  b.disabled = true;
+  try {
+    const reply = await sendChat("What do you see?");
+    if (reply && (speakReplies || talkMode)) speak(reply.spoken);
+  } finally {
+    b.disabled = false;
+  }
+});
+
+if (eyeOn && paneOpen("pane-eye")) eyeStart();
+else eyeStop(eyeOn ? "paused" : "camera off");
 
 refreshLights();
 setInterval(refreshLights, 10000);
-$("prompt").focus();
+if (paneOpen("pane-chat")) $("prompt").focus({ preventScroll: true });
