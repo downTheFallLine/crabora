@@ -406,6 +406,8 @@ class Streamer:
         self.goal = {}           # {sid: counts} last sent
         self.speed = {}          # {sid: steps/s} between the last two frames
         self.sent_at = None
+        self.ref = {}            # {sid: counts} where the joint SHOULD be
+                                 # now; differs from goal under --lead
         self.lag = {name: [] for _, name in JOINTS}   # [(|err|, |speed|)]
 
     def counts(self, frame):
@@ -421,15 +423,20 @@ class Streamer:
                 out[sid] = got
         return out
 
-    def stream(self, frame):
+    def stream(self, frame, ref_frame=None):
+        """Send `frame`. `ref_frame` is where the joints should actually
+        be at this instant: with a timing lead the frame sent is ahead of
+        it, and tracking is judged against the reference, not the goal."""
         targets = self.counts(frame)
         sync_write_goals(self.by_port, targets)
+        ref = targets if ref_frame is None else self.counts(ref_frame)
         now = time.monotonic()
         if self.sent_at is not None and now > self.sent_at:
             dt = now - self.sent_at
-            for sid, c in targets.items():
-                self.speed[sid] = (c - self.goal[sid]) / dt
+            for sid, c in ref.items():
+                self.speed[sid] = (c - self.ref[sid]) / dt
         self.goal = targets
+        self.ref = ref
         self.sent_at = now
 
     def sample_lag(self, i):
@@ -443,13 +450,13 @@ class Streamer:
         behind.
         """
         sid = self.sids[i % len(self.sids)]
-        if sid not in self.goal:
+        if sid not in self.ref:
             return
         port, name = self.where[sid]
         # read_status, not a bare position read: the same round trip
         # brings back the servo's current for agentix's power view.
         pos = read_status(self.packet, port, sid, "position")["pos"]
-        self.lag[name].append((abs(pos - self.goal[sid]),
+        self.lag[name].append((abs(pos - self.ref[sid]),
                                abs(self.speed.get(sid, 0.0))))
 
     def lag_report(self):
@@ -561,6 +568,19 @@ def run_scurry(st, p, args, *, should_cancel=None, log=print):
 
     dt = 1.0 / args.rate
     total = p["total"]
+    # Timing lead: send each pose this many seconds early, so a servo
+    # that runs a steady lag behind its goal lands on the trajectory on
+    # time. getattr: agentix builds its own args and may not carry it.
+    # One value for all joints, or three (coxa femur tibia): the femur and
+    # tibia lag more than the coxa, and one lead that suits them
+    # overshoots the coxa.
+    lead = getattr(args, "lead", None) or [0.0]
+    if not isinstance(lead, (list, tuple)):
+        lead = [lead]
+    lead = [max(0.0, float(x)) for x in lead]
+    if len(lead) == 1:
+        lead = lead * 3
+    lead_of = {"coxa": lead[0], "femur": lead[1], "tibia": lead[2]}
     min_volts = None
     late = 0
     stopped = None
@@ -578,7 +598,16 @@ def run_scurry(st, p, args, *, should_cancel=None, log=print):
             t = now - t0
             phase = phase_at(t, args.period, p["n_cycles"])
             frame, _ = gait_frame(phase, legs, **common)
-            st.stream(frame)
+            if any(lead_of.values()):
+                ahead = {}
+                for d in set(lead_of.values()):
+                    ph = phase_at(t + d, args.period, p["n_cycles"])
+                    ahead[d], _ = gait_frame(ph, legs, **common)
+                sent = {leg: {j: ahead[lead_of[j]][leg][j] for j in lead_of}
+                        for leg in frame}
+                st.stream(sent, ref_frame=frame)
+            else:
+                st.stream(frame)
             if t >= total:
                 break
 
@@ -723,6 +752,12 @@ def main():
     ap.add_argument("--allow-fast", action="store_true",
                     help=f"run even if a joint needs more than "
                          f"{MAX_FOLLOW_SPEED} steps/s")
+    ap.add_argument("--lead", type=float, nargs="+", default=[0.0],
+                    metavar="SECONDS",
+                    help="send each pose this many seconds early to cancel "
+                         "servo lag: one value for all joints, or three for "
+                         "coxa femur tibia (default 0; the tracking table's "
+                         "lag column says how much there is)")
     ap.add_argument("--legs", type=int, nargs="+", default=list(ALL_LEGS))
     ap.add_argument("--no-pause", dest="pause", action="store_false")
     ap.add_argument("--force", action="store_true",
@@ -740,6 +775,9 @@ def main():
         ap.error("legs must be 1-6")
     if args.distance <= 0:
         ap.error("distance must be positive")
+    if len(args.lead) not in (1, 3) or not all(0 <= x <= 0.5 for x in args.lead):
+        ap.error("--lead takes one value or three (coxa femur tibia), "
+                 "each 0-0.5 s")
     if not 0.5 <= args.period <= 20:
         ap.error("--period must be 0.5-20 s")
     if not 0 < args.stride <= 150:
