@@ -180,13 +180,29 @@ Gotchas:
 - Nothing on the I2C bus or GPIO may see more than 3.3 V. Never connect a
   pack voltage or balance lead to a GPIO pin.
 
+## Measured 2026-11-24 (servo-reported, `--power-log`)
+
+| Load | Peak | Supply |
+|---|---|---|
+| Standing still | ~1.3 A | 7.5 V |
+| Stand-up | 1.9 A | dips to 7.1 V |
+| Scurry on a desk, 3 s / 2 s cycle | 2.1 / 2.3 A | 7.2 V |
+| Scurry on a rug, 3 s cycle | 4.5-5.2 A | 6.3 down to 5.0 V |
+| Scurry in the air, up to 286 mm/s | <0.5 A | 7.3 V |
+
+The LM2596 copes on a desk and runs away on a rug: sag weakens the
+servos, loaded tibias stall, current rises, sag deepens. Late in the
+session the supply read 3.9 V at only ~0.5 A, which points at a flat pack
+or a hot buck rather than the current limit. Details in `testLog.md`.
+
 ## Open items
 
 - PRIPOWER: confirm which 3S pack is in, and that the fuse, cell alarm,
   and 3S balance charger are in place.
 - LOCOPOWER: return the defective XINGYHENG 20 A buck; pick and order a
-  replacement (15-20 A class, CV/CC); measure real currents with a watt
-  meter.
+  replacement (15-20 A class, CV/CC). Now the top blocker: the rug needs
+  ~5 A. Measure real currents with a watt meter to calibrate the
+  servos' own readings.
 - LOGIPOWER: the 5 V BEC is an LM2596 (40 V in, ~2 A continuous). Fine
   for the 3S upgrade; replace with a 3 A+ converter before a camera.
 - Add the INA226 pack-voltage check to the motion preflight.

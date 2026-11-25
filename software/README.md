@@ -164,16 +164,22 @@ machine with no servo SDK installed.
 
 ## Known open items
 
-- **Power is unmeasured.** The LM2596 passes 2–3 A on paper. It now
-  regulates 7.4 V from a 3S pack, and the robot stands and turns on it.
-  The 20 A replacement buck arrived defective and is being returned.
-  Every motion program now takes `--power-log` (see "Measuring power"
-  below), which reads the servos' own current and voltage and says
-  whether the buck is the wall. An inline watt-meter is still the ground
-  truth and would calibrate the servos' readings.
-- **Walking speed.** `walk.py` walks; `scurry.py` should walk faster but
-  has not yet run on hardware, and quick tripod reversals are where the
-  unmeasured power path is most likely to show.
+The full, prioritized list is `../doc/Crabora-next-steps.xlsx`; the
+measurements behind it are in `../doc/testLog.md` (2026-11-24). In short:
+
+- **The LM2596 servo buck is the wall on the floor.** Measured: standing
+  ~1.3 A, the desk scurry ~2.1-2.3 A, the rug 4.5-5.2 A with the supply
+  sagging to 5.0 V. Every rug run was stopped by the low-voltage guard.
+  A 15-20 A buck is the next part to buy.
+- **`scurry.py` runs on hardware.** 286 mm/s on the test stand with
+  `--period 0.7 --allow-fast`, using the new defaults and `--lead`.
+  Floor speed waits on the buck.
+- **Horn screws work loose.** Leg 4's tibia and leg 3's femur were both
+  loose on 2026-11-24, which caused the "45° left" skew and repeated
+  tibia stalls. Check all 18 joints now and then.
+- **Pack voltage is invisible to the software** now that the buck
+  regulates. A flat pack showed up only as a 3.9 V servo supply at
+  0.5 A. Use the cell alarm; add the INA226 check.
 
 ## Legacy
 
