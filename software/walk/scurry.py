@@ -25,9 +25,12 @@ The geometry is walk.py's, unchanged: stance feet are re-solved with
 walk.stance_pose() so they hold their patch of floor while the body
 moves. What is new is only WHEN each pose is asked for:
 
-  - each tripod spends `--duty` of the cycle on the floor (0.55 by
-    default, so both tripods are briefly down together at each
-    changeover -- a margin for servo lag, which is real and unmeasured)
+  - each tripod spends `--duty` of the cycle on the floor (0.5 by
+    default: one tripod lands as the other lifts. 0.55 keeps both
+    briefly down together at each changeover, a margin if it stumbles)
+  - each joint's pose is sent `--lead` seconds early, so a servo that
+    runs a steady 100-200 ms behind its goal lands on the trajectory on
+    time
   - the swing foot leaves the floor moving with it, arcs up, and comes
     down moving with it again (a Hermite curve on the stride, a sine on
     the femur), so there is no velocity jump at lift-off or touchdown
@@ -55,26 +58,30 @@ stand in for walk.py's checks:
 Either way it stops by planting whichever feet are up and holding, torque
 ON -- same rule as walk.py's Ctrl-C.
 
-GOING FASTER. Body speed comes from stride, and the femur's speed from
-lift, so the defaults pair a long stride (120 mm asked) with a modest
-lift (20°) and a slightly narrower stance (110 mm) -- about 67 mm/s at
-the default 3.0 s period. Then shorten --period a step at a time (2.5,
-2.0, 1.7, ...) and watch the voltage and tracking figures it prints at
-the end. --dry-run gives the joint speeds each setting needs and refuses
-one the servos cannot plausibly follow under load.
+GOING FASTER. The defaults (stride 110 mm, lift 15°, foot-out 90 mm,
+duty 0.5, lead 0.16/0.15/0.18 s) were picked for top speed: about
+67 mm/s at the default 3.0 s period, and 286 mm/s at --period 0.7
+--allow-fast on the test stand, where the coxa and tibia are both near
+their ~2,500-2,900 steps/s ceilings. Shorten --period a step at a time
+and watch the voltage and tracking figures it prints at the end.
+--dry-run gives the joint speeds each setting needs and refuses one the
+servos cannot plausibly follow under load.
 
 Past about a 1.6 s period the stream needs more acceleration than the
 servo register can hold (25,400 steps/s^2). The plan then sets it
 unlimited rather than capping it silently, and suggests --rate 100 to
 keep each frame's step small.
 
-NOT YET RUN ON HARDWARE.
+RUN ON HARDWARE 2026-11-24: on the desk at 3.0 and 2.0 s, and on the
+test stand down to 0.7 s. Not yet run fast on the floor; the LM2596
+servo buck sags past ~2 A, so floor speed waits on a bigger buck.
 
 Usage:
   python3 scurry.py 500 --dry-run            # plan only, touch nothing
   python3 scurry.py 500                      # 0.5 m forward, 3 s cycles
   python3 scurry.py 500 --period 2.0         # quicker
-  python3 scurry.py 500 --period 1.7 --duty 0.5   # ~118 mm/s planned
+  python3 scurry.py 1000 --period 0.7 --allow-fast   # 286 mm/s planned
+  python3 scurry.py 500 --lift 20 --duty 0.55        # the old, cautious set
   python3 scurry.py 300 --heading 90         # sideways, left
 
 Requires: pip install feetech-servo-sdk   (provides the scservo_sdk module)
@@ -120,15 +127,27 @@ DEFAULT_PERIOD = 3.0     # seconds per full cycle (both tripods swing once).
 # femur does all the lifting, inside the swing, so its speed scales with
 # lift and not stride; body speed scales with stride and not lift. So a
 # long stride with a modest lift, rather than walk.py's 50 mm and 35°.
-DEFAULT_STRIDE = 120.0   # mm each stance foot covers (asked; plan() may cap it)
-DEFAULT_LIFT = 20.0      # femur degrees of swing lift. ~30 mm of foot rise,
-                         # still clear of TRIPOD_SAG on a flat floor
-DEFAULT_FOOT_OUT = 110.0 # mm outboard of the femur axis while scurrying. 10 mm
-                         # in from the stand pose: it slows the femur and
-                         # tibia and gives the stride more reach
+#
+# The stride, lift, foot-out, duty and lead defaults below come from a
+# dry-run sweep and test-stand runs on 2026-11-24: together they reach
+# 286 mm/s (--period 0.7 --allow-fast) with the tibia under its ~2,900
+# steps/s ceiling, where the old 120 / 20 / 110 / 0.55 / no-lead set
+# topped out at 200 mm/s. Not yet proven on the floor.
+DEFAULT_STRIDE = 110.0   # mm each stance foot covers (asked; plan() may cap
+                         # it). Longer costs more joint speed than it gains
+DEFAULT_LIFT = 15.0      # femur degrees of swing lift, ~22 mm of foot rise.
+                         # 20 was the old value; raise it on rough ground
+DEFAULT_FOOT_OUT = 90.0  # mm outboard of the femur axis while scurrying,
+                         # 30 mm in from the stand pose. Further in eases
+                         # the tibia and loads the coxa; ~90-95 balances them
 STAND_FOOT_OUT = 120.0   # where stand.py leaves the feet, so where a run
                          # starts from and goes back to
-DEFAULT_DUTY = 0.55      # fraction of the cycle each tripod is on the floor
+DEFAULT_DUTY = 0.5       # fraction of the cycle each tripod is on the floor.
+                         # 0.5 gives the swing the most time (swing speeds
+                         # ~17% lower than 0.55) but no moment with all six
+                         # feet down; use 0.52 if it stumbles at changeover
+DEFAULT_LEAD = (0.16, 0.15, 0.18)  # s each joint's pose is sent early
+                         # (coxa, femur, tibia), tuned in the air at 286 mm/s
 DEFAULT_RATE = 50.0      # frames per second sent to the servos
 DEFAULT_MIN_VOLTS = 6.5  # stop below this. The buck is set to 7.4 V; the
                          # servos' own under-voltage trip is lower, but by
@@ -752,12 +771,13 @@ def main():
     ap.add_argument("--allow-fast", action="store_true",
                     help=f"run even if a joint needs more than "
                          f"{MAX_FOLLOW_SPEED} steps/s")
-    ap.add_argument("--lead", type=float, nargs="+", default=[0.0],
-                    metavar="SECONDS",
+    ap.add_argument("--lead", type=float, nargs="+",
+                    default=list(DEFAULT_LEAD), metavar="SECONDS",
                     help="send each pose this many seconds early to cancel "
                          "servo lag: one value for all joints, or three for "
-                         "coxa femur tibia (default 0; the tracking table's "
-                         "lag column says how much there is)")
+                         "coxa femur tibia (default "
+                         + " ".join(f"{x:g}" for x in DEFAULT_LEAD)
+                         + "; --lead 0 turns it off)")
     ap.add_argument("--legs", type=int, nargs="+", default=list(ALL_LEGS))
     ap.add_argument("--no-pause", dest="pause", action="store_false")
     ap.add_argument("--force", action="store_true",

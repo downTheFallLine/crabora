@@ -627,7 +627,7 @@ def scurry(arbiter, safety, distance: float = 300.0,
         lift=prog.DEFAULT_LIFT, height=prog.DEFAULT_HEIGHT,
         foot_out=prog.DEFAULT_FOOT_OUT,
         coxa_limit=prog.DEFAULT_COXA_LIMIT, rate=prog.DEFAULT_RATE,
-        min_volts=prog.DEFAULT_MIN_VOLTS)
+        min_volts=prog.DEFAULT_MIN_VOLTS, lead=list(prog.DEFAULT_LEAD))
     legs = sorted(ALL_LEGS)
     try:
         p = prog.plan(args, legs)
